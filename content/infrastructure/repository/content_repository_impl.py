@@ -1,0 +1,544 @@
+from typing import Iterable
+from datetime import datetime, timedelta
+
+from sqlalchemy import text
+
+from config.database.session import SessionLocal
+from content.application.port.content_repository_port import ContentRepositoryPort
+from content.domain.channel import Channel
+from content.domain.comment_sentiment import CommentSentiment
+from content.domain.crawl_log import CrawlLog
+from content.domain.creator_account import CreatorAccount
+from content.domain.keyword_mapping import KeywordMapping
+from content.domain.keyword_trend import KeywordTrend
+from content.domain.category_trend import CategoryTrend
+from content.domain.video import Video
+from content.domain.video_comment import VideoComment
+from content.domain.video_score import VideoScore
+from content.domain.video_sentiment import VideoSentiment
+from content.infrastructure.orm.models import (
+    ChannelORM,
+    CreatorAccountORM,
+    VideoORM,
+    VideoCommentORM,
+    VideoSentimentORM,
+    CommentSentimentORM,
+    KeywordTrendORM,
+    CategoryTrendORM,
+    KeywordMappingORM,
+    VideoScoreORM,
+    CrawlLogORM,
+)
+
+
+class ContentRepositoryImpl(ContentRepositoryPort):
+    def __init__(self):
+        self.db = SessionLocal()
+
+    def upsert_channel(self, channel: Channel) -> Channel:
+        orm = self.db.get(ChannelORM, channel.channel_id)
+        if orm is None:
+            orm = ChannelORM(channel_id=channel.channel_id)
+            self.db.add(orm)
+            # 한국어 주석: 최초 적재 시 정적 메타데이터 전체를 저장합니다.
+            orm.platform = channel.platform or "youtube"
+            orm.title = channel.title
+            orm.description = channel.description
+            orm.country = channel.country
+            orm.created_at = channel.created_at
+        # 한국어 주석: 기존 레코드는 변동성 필드(구독/조회/영상 수, 수집시각)만 최신화합니다.
+        orm.subscriber_count = channel.subscriber_count
+        orm.view_count = channel.view_count
+        orm.video_count = channel.video_count
+        orm.crawled_at = channel.crawled_at
+
+        self.db.commit()
+        return channel
+
+    def upsert_account(self, account: CreatorAccount) -> CreatorAccount:
+        orm = (
+            self.db.query(CreatorAccountORM)
+            .filter(
+                CreatorAccountORM.account_id == account.account_id,
+                CreatorAccountORM.platform == account.platform,
+            )
+            .one_or_none()
+        )
+        if orm is None:
+            orm = CreatorAccountORM(account_id=account.account_id, platform=account.platform)
+            self.db.add(orm)
+            # 한국어 주석: 최초 적재 시 정적 프로필 정보를 저장합니다.
+            orm.display_name = account.display_name
+            orm.username = account.username
+            orm.profile_url = account.profile_url
+            orm.description = account.description
+            orm.country = account.country
+        # 한국어 주석: 변동성 필드(팔로워/게시물 수, 최신 업데이트 시간)만 갱신합니다.
+        orm.follower_count = account.follower_count
+        orm.post_count = account.post_count
+        orm.last_updated_at = account.last_updated_at
+        orm.crawled_at = account.crawled_at
+        self.db.commit()
+        return account
+
+    def upsert_video(self, video: Video) -> Video:
+        orm = self.db.get(VideoORM, video.video_id)
+        if orm is None:
+            orm = VideoORM(video_id=video.video_id)
+            self.db.add(orm)
+            # 한국어 주석: 최초 적재 시 정적 메타데이터를 저장하여 이후 변동성 업데이트와 분리합니다.
+            orm.platform = video.platform or "youtube"
+            orm.channel_id = video.channel_id
+            orm.title = video.title
+            orm.description = video.description
+            orm.tags = video.tags
+            orm.category_id = video.category_id
+            orm.published_at = video.published_at
+            orm.duration = video.duration
+            orm.thumbnail_url = video.thumbnail_url
+        # 한국어 주석: 기존 레코드는 변동성 필드(조회/좋아요/댓글 수, 최신 수집시각)만 갱신합니다.
+        orm.view_count = video.view_count
+        orm.like_count = video.like_count
+        orm.comment_count = video.comment_count
+        orm.crawled_at = video.crawled_at
+
+        self.db.commit()
+        return video
+
+    def upsert_comments(self, comments: Iterable[VideoComment]) -> None:
+        for comment in comments:
+            orm = self.db.get(VideoCommentORM, comment.comment_id)
+            if orm is None:
+                orm = VideoCommentORM(comment_id=comment.comment_id)
+                self.db.add(orm)
+                # 한국어 주석: 최초 적재 시 댓글 본문/작성자 등 정적 정보를 저장합니다.
+                orm.platform = comment.platform or "youtube"
+                orm.video_id = comment.video_id
+                orm.author = comment.author
+                orm.content = comment.content
+                orm.published_at = comment.published_at
+            # 한국어 주석: 기존 댓글은 변동성 필드(좋아요 수)만 업데이트합니다.
+            orm.like_count = comment.like_count
+        self.db.commit()
+
+    def upsert_video_sentiment(self, sentiment: VideoSentiment) -> VideoSentiment:
+        orm = self.db.get(VideoSentimentORM, sentiment.video_id)
+        if orm is None:
+            orm = VideoSentimentORM(video_id=sentiment.video_id)
+            self.db.add(orm)
+        orm.platform = sentiment.platform or "youtube"
+        orm.category = sentiment.category
+        orm.trend_score = sentiment.trend_score
+        orm.sentiment_label = sentiment.sentiment_label
+        orm.sentiment_score = sentiment.sentiment_score
+        orm.keywords = sentiment.keywords
+        orm.summary = sentiment.summary
+        orm.analyzed_at = sentiment.analyzed_at
+        self.db.commit()
+        return sentiment
+
+    def upsert_comment_sentiments(self, sentiments: Iterable[CommentSentiment]) -> None:
+        for sentiment in sentiments:
+            orm = self.db.get(CommentSentimentORM, sentiment.comment_id)
+            if orm is None:
+                orm = CommentSentimentORM(comment_id=sentiment.comment_id)
+                self.db.add(orm)
+            orm.platform = sentiment.platform or "youtube"
+            orm.sentiment_label = sentiment.sentiment_label
+            orm.sentiment_score = sentiment.sentiment_score
+            orm.analyzed_at = sentiment.analyzed_at
+        self.db.commit()
+
+    def upsert_keyword_trend(self, trend: KeywordTrend) -> KeywordTrend:
+        orm = (
+            self.db.query(KeywordTrendORM)
+            .filter(
+                KeywordTrendORM.keyword == trend.keyword,
+                KeywordTrendORM.date == trend.date,
+                KeywordTrendORM.platform == trend.platform,
+            )
+            .one_or_none()
+        )
+        if orm is None:
+            orm = KeywordTrendORM(
+                keyword=trend.keyword, date=trend.date, platform=trend.platform
+            )
+            self.db.add(orm)
+        orm.search_volume = trend.search_volume
+        orm.search_volume_prev = trend.search_volume_prev
+        orm.video_count = trend.video_count
+        orm.video_count_prev = trend.video_count_prev
+        orm.avg_sentiment = trend.avg_sentiment
+        orm.avg_trend = trend.avg_trend
+        orm.avg_total_score = trend.avg_total_score
+        orm.growth_rate = trend.growth_rate
+        orm.rank = trend.rank
+        self.db.commit()
+        return trend
+
+    def upsert_category_trend(self, trend: CategoryTrend) -> CategoryTrend:
+        orm = (
+            self.db.query(CategoryTrendORM)
+            .filter(
+                CategoryTrendORM.category == trend.category,
+                CategoryTrendORM.date == trend.date,
+                CategoryTrendORM.platform == trend.platform,
+            )
+            .one_or_none()
+        )
+        if orm is None:
+            orm = CategoryTrendORM(
+                category=trend.category, date=trend.date, platform=trend.platform
+            )
+            self.db.add(orm)
+        orm.video_count = trend.video_count
+        orm.video_count_prev = trend.video_count_prev
+        orm.avg_sentiment = trend.avg_sentiment
+        orm.avg_trend = trend.avg_trend
+        orm.avg_total_score = trend.avg_total_score
+        orm.search_volume = trend.search_volume
+        orm.search_volume_prev = trend.search_volume_prev
+        orm.growth_rate = trend.growth_rate
+        orm.rank = trend.rank
+        self.db.commit()
+        return trend
+
+    def upsert_keyword_mapping(self, mapping: KeywordMapping) -> KeywordMapping:
+        # 동일 (video_id, keyword, platform) 조합 중복 삽입을 막기 위해 조회 후 갱신/신규 생성
+        platform = mapping.platform or "youtube"
+        orm = None
+        if mapping.video_id and mapping.keyword:
+            orm = (
+                self.db.query(KeywordMappingORM)
+                .filter(
+                    KeywordMappingORM.video_id == mapping.video_id,
+                    KeywordMappingORM.keyword == mapping.keyword,
+                    KeywordMappingORM.platform == platform,
+                )
+                .one_or_none()
+            )
+        if orm is None:
+            orm = KeywordMappingORM()
+            self.db.add(orm)
+        orm.platform = platform
+        orm.video_id = mapping.video_id
+        orm.channel_id = mapping.channel_id
+        orm.keyword = mapping.keyword
+        orm.weight = mapping.weight
+        self.db.commit()
+        mapping.mapping_id = getattr(orm, "mapping_id", None)
+        return mapping
+
+    def upsert_video_score(self, score: VideoScore) -> VideoScore:
+        orm = self.db.get(VideoScoreORM, score.video_id)
+        if orm is None:
+            orm = VideoScoreORM(video_id=score.video_id)
+            self.db.add(orm)
+        orm.platform = score.platform or "youtube"
+        orm.engagement_score = score.engagement_score
+        orm.sentiment_score = score.sentiment_score
+        orm.trend_score = score.trend_score
+        orm.total_score = score.total_score
+        orm.updated_at = score.updated_at
+        self.db.commit()
+        return score
+
+    def log_crawl(self, log: CrawlLog) -> CrawlLog:
+        orm = CrawlLogORM(
+            target_type=log.target_type,
+            target_id=log.target_id,
+            status=log.status,
+            message=log.message,
+            crawled_at=log.crawled_at,
+        )
+        self.db.add(orm)
+        self.db.commit()
+        log.id = orm.id
+        return log
+
+    def fetch_videos_by_category(self, category: str, limit: int = 20) -> list[dict]:
+        """
+        카테고리 기준 상위 콘텐츠를 점수/조회수 기반으로 조회한다.
+        """
+        rows = self.db.execute(
+            text(
+                """
+                SELECT
+                    v.video_id,
+                    v.title,
+                    v.channel_id,
+                    v.platform,
+                    v.view_count,
+                    v.like_count,
+                    v.comment_count,
+                    v.published_at,
+                    v.thumbnail_url,
+                    vs.category,
+                    vs.sentiment_label,
+                    vs.sentiment_score,
+                    vs.trend_score,
+                    sc.engagement_score,
+                    sc.sentiment_score AS score_sentiment,
+                    sc.trend_score AS score_trend,
+                    sc.total_score
+                FROM video v
+                LEFT JOIN video_sentiment vs ON vs.video_id = v.video_id
+                LEFT JOIN video_score sc ON sc.video_id = v.video_id
+                WHERE vs.category = :category
+                ORDER BY COALESCE(sc.total_score, sc.sentiment_score, sc.trend_score, v.view_count) DESC NULLS LAST,
+                         v.crawled_at DESC
+                LIMIT :limit
+                """
+            ),
+            {"category": category, "limit": limit},
+        ).mappings()
+        return [dict(row) for row in rows]
+
+    def fetch_videos_by_keyword(self, keyword: str, limit: int = 20) -> list[dict]:
+        """
+        키워드 기준 상위 콘텐츠를 점수/조회수 기반으로 조회한다.
+        """
+        rows = self.db.execute(
+            text(
+                """
+                SELECT
+                    v.video_id,
+                    v.title,
+                    v.channel_id,
+                    v.platform,
+                    v.view_count,
+                    v.like_count,
+                    v.comment_count,
+                    v.published_at,
+                    v.thumbnail_url,
+                    vs.category,
+                    vs.sentiment_label,
+                    vs.sentiment_score,
+                    vs.trend_score,
+                    sc.engagement_score,
+                    sc.sentiment_score AS score_sentiment,
+                    sc.trend_score AS score_trend,
+                    sc.total_score
+                FROM keyword_mapping km
+                JOIN video v ON v.video_id = km.video_id
+                LEFT JOIN video_sentiment vs ON vs.video_id = v.video_id
+                LEFT JOIN video_score sc ON sc.video_id = v.video_id
+                WHERE km.keyword = :keyword
+                ORDER BY COALESCE(sc.total_score, sc.sentiment_score, sc.trend_score, v.view_count) DESC NULLS LAST,
+                         v.crawled_at DESC
+                LIMIT :limit
+                """
+            ),
+            {"keyword": keyword, "limit": limit},
+        ).mappings()
+        return [dict(row) for row in rows]
+
+    def fetch_top_keywords_by_category(self, category: str, limit: int = 10) -> list[dict]:
+        """
+        특정 카테고리 내 콘텐츠에서 많이 등장한 주요 키워드를 빈도순으로 조회한다.
+        """
+        rows = self.db.execute(
+            text(
+                """
+                SELECT
+                    km.keyword,
+                    COUNT(DISTINCT km.video_id) AS video_count
+                FROM keyword_mapping km
+                JOIN video_sentiment vs ON vs.video_id = km.video_id
+                WHERE vs.category = :category
+                GROUP BY km.keyword
+                ORDER BY COUNT(DISTINCT km.video_id) DESC, km.keyword
+                LIMIT :limit
+                """
+            ),
+            {"category": category, "limit": limit},
+        ).mappings()
+        return [dict(row) for row in rows]
+
+    def fetch_top_keywords_by_keyword(self, keyword: str, limit: int = 10) -> list[dict]:
+        """
+        특정 키워드와 함께 등장한 연관 키워드를 빈도순으로 조회한다.
+        """
+        rows = self.db.execute(
+            text(
+                """
+                SELECT
+                    km2.keyword,
+                    COUNT(DISTINCT km2.video_id) AS video_count
+                FROM keyword_mapping km_target
+                JOIN keyword_mapping km2 ON km_target.video_id = km2.video_id
+                WHERE km_target.keyword = :keyword
+                  AND km2.keyword <> :keyword
+                GROUP BY km2.keyword
+                ORDER BY COUNT(DISTINCT km2.video_id) DESC, km2.keyword
+                LIMIT :limit
+                """
+            ),
+            {"keyword": keyword, "limit": limit},
+        ).mappings()
+        return [dict(row) for row in rows]
+
+    def fetch_video_with_scores(self, video_id: str) -> dict | None:
+        """
+        콘텐츠 단건 상세(점수/키워드 포함)를 조회한다.
+        """
+        video = self.db.execute(
+            text(
+                """
+                SELECT v.video_id, v.title, v.channel_id, v.platform, v.view_count, v.like_count, v.comment_count,
+                       v.published_at, v.thumbnail_url,
+                       vs.category, vs.sentiment_label, vs.sentiment_score, vs.trend_score, vs.keywords, vs.summary,
+                       sc.engagement_score, sc.sentiment_score AS score_sentiment, sc.trend_score AS score_trend, sc.total_score,
+                       vs.analyzed_at
+                FROM video v
+                LEFT JOIN video_sentiment vs ON vs.video_id = v.video_id
+                LEFT JOIN video_score sc ON sc.video_id = v.video_id
+                WHERE v.video_id = :video_id
+                """
+            ),
+            {"video_id": video_id},
+        ).mappings().first()
+
+        if not video:
+            return None
+
+        keywords = self.db.execute(
+            text(
+                """
+                SELECT keyword, weight, platform, video_id, channel_id
+                FROM keyword_mapping
+                WHERE video_id = :video_id
+                ORDER BY weight DESC NULLS LAST, keyword
+                """
+            ),
+            {"video_id": video_id},
+        ).mappings().all()
+
+        return {"video": dict(video), "keywords": [dict(k) for k in keywords]}
+
+    def fetch_hot_category_trends(self, platform: str | None = None, limit: int = 20) -> list[dict]:
+        """
+        최신 집계 일자의 카테고리별 랭킹을 반환한다.
+        """
+        rows = self.db.execute(
+            text(
+                """
+                 SELECT ct.category,
+                       ct.platform,
+                       ct.date,
+                       ct.video_count,
+                       ct.video_count_prev,
+                       ct.avg_sentiment,
+                       ct.avg_trend,
+                       ct.avg_total_score,
+                       ct.search_volume,
+                       ct.search_volume_prev,
+                       ct.growth_rate,
+                       ct.rank
+                FROM category_trend ct
+                JOIN (
+                    SELECT category, platform, MAX(date) AS max_date
+                    FROM category_trend
+                    WHERE (:platform IS NULL OR platform = :platform)
+                    GROUP BY category, platform
+                ) latest
+                  ON ct.category = latest.category
+                 AND ct.platform = latest.platform
+                 AND ct.date = latest.max_date
+                WHERE (:platform IS NULL OR ct.platform = :platform)
+                ORDER BY ct.rank ASC NULLS LAST, ct.search_volume DESC NULLS LAST
+                LIMIT :limit
+                """
+            ),
+            {"platform": platform, "limit": limit},
+        ).mappings()
+        return [dict(r) for r in rows]
+
+    def fetch_recommended_videos_by_category(
+        self, category: str, limit: int = 20, days: int = 14, platform: str | None = None
+    ) -> list[dict]:
+        """
+        카테고리 내 최근 수집 콘텐츠를 점수 기반으로 추천한다.
+        """
+        # 이전 예외로 인한 pending rollback 상태 방지
+        try:
+            self.db.rollback()
+        except Exception:
+            pass
+        # days 파라미터는 "최근 N일간 게시된 영상"을 의미하도록, 수집 시점(crawled_at)이 아닌 게시 시점(published_at)으로 필터링한다.
+            # days 파라미터는 "최근 N일간 게시된 영상"을 의미하도록, 수집 시점(crawled_at)이 아닌 게시 시점(published_at)으로 필터링한다.
+        since_date = (datetime.utcnow() - timedelta(days=days)).date()
+        until_date = datetime.utcnow().date()
+        rows = self.db.execute(
+            text(
+                """
+                SELECT
+                    v.video_id,
+                    v.title,
+                    v.channel_id,
+                    v.platform,
+                    v.view_count,
+                    v.like_count,
+                    v.comment_count,
+                    v.published_at,
+                    v.thumbnail_url,
+                    vs.category,
+                    vs.sentiment_label,
+                    vs.sentiment_score,
+                    vs.trend_score,
+                    sc.engagement_score,
+                    sc.sentiment_score AS score_sentiment,
+                    sc.trend_score AS score_trend,
+                    sc.total_score,
+                    v.crawled_at,
+                    -- username(또는 display_name/title)을 단 한 번만 @로 prefix 하여 프런트에 바로 전달
+                    CASE
+                        WHEN COALESCE(ca.username, ca.display_name, ch.title, v.channel_id) LIKE '@%' THEN COALESCE(ca.username, ca.display_name, ch.title, v.channel_id)
+                        ELSE '@' || COALESCE(ca.username, ca.display_name, ch.title, v.channel_id)
+                    END AS channel_username
+                FROM video v
+                JOIN video_sentiment vs ON vs.video_id = v.video_id
+                LEFT JOIN video_score sc ON sc.video_id = v.video_id
+                LEFT JOIN creator_account ca ON ca.account_id = v.channel_id AND ca.platform = v.platform
+                LEFT JOIN channel ch ON ch.channel_id = v.channel_id
+                WHERE vs.category = :category
+                AND v.published_at::date BETWEEN :since_date AND :until_date
+                  AND (:platform IS NULL OR v.platform = :platform)
+                ORDER BY COALESCE(sc.total_score, sc.sentiment_score, sc.trend_score, v.view_count) DESC NULLS LAST,
+                         v.crawled_at DESC
+                LIMIT :limit
+                """
+            ),
+            {
+                "category": category,
+                "since_date": since_date,
+                "until_date": until_date,
+                "platform": platform,
+                "limit": limit,
+            },
+        ).mappings()
+        return [dict(r) for r in rows]
+
+    def fetch_distinct_categories(self, limit: int = 100) -> list[str]:
+        """
+        등록된 카테고리 목록만 조회(관심사 등록용).
+        """
+        try:
+            self.db.rollback()
+        except Exception:
+            pass
+        rows = self.db.execute(
+            text(
+                """
+                SELECT category FROM (
+                    SELECT DISTINCT category FROM video_sentiment WHERE category IS NOT NULL
+                    UNION
+                    SELECT DISTINCT category FROM category_trend WHERE category IS NOT NULL
+                ) c
+                ORDER BY category
+                LIMIT :limit
+                """
+            ),
+            {"limit": limit},
+        ).scalars()
+        return list(rows)
