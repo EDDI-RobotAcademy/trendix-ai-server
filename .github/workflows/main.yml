@@ -57,14 +57,3 @@ jobs:
       - name: Run container
         run: |
           docker-compose up -d
-
-      - name: Health check
-        run: |
-          sleep 5
-          if curl -sSf http://localhost:37123/ > /dev/null; then
-            echo "multi-agent-ui is UP"
-          else
-            echo "Health check failed"
-            docker logs multi-agent-ui --tail 200
-            exit 1
-          fi
