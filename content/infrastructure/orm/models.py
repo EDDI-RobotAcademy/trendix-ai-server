@@ -1,5 +1,5 @@
 from datetime import datetime, date
-from sqlalchemy import Column, String, Text, BigInteger, Integer, DateTime, Date, DECIMAL, PrimaryKeyConstraint, text
+from sqlalchemy import Column, String, Text, BigInteger, Integer, DateTime, Date, DECIMAL, Boolean, PrimaryKeyConstraint, UniqueConstraint, text
 
 from config.database.session import Base
 
@@ -178,3 +178,17 @@ class VideoMetricsSnapshotORM(Base):
     view_count = Column(BigInteger)
     like_count = Column(BigInteger)
     comment_count = Column(BigInteger)
+
+
+class StopwordORM(Base):
+    __tablename__ = "stopword"
+
+    __table_args__ = (
+        UniqueConstraint("lang", "word", name="ux_tb_stopword_lang_word"),
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    lang = Column(String(10), nullable=False, default="ko")
+    word = Column(Text, nullable=False)
+    enabled = Column(Boolean, nullable=False, default=True)
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
