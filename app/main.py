@@ -3,7 +3,7 @@ import boto3
 import asyncio
 from contextlib import asynccontextmanager
 from dotenv import load_dotenv
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 
 from account.adapter.input.web.account_router import account_router
@@ -14,6 +14,9 @@ from social_oauth.adapter.input.web.google_oauth2_router import authentication_r
 from app.batch.trend_batch import start_trend_scheduler
 from config.database.session import init_db_schema
 from social_oauth.adapter.input.web.logout_router import logout_router
+
+from content.infrastructure.middleware.stopword_middleware import StopwordMiddleware
+
 
 load_dotenv()
 
@@ -50,6 +53,11 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# 불용어 처리 미들웨어
+app.add_middleware(
+    StopwordMiddleware
+)
+
 app.include_router(account_router, prefix="/accounts")
 app.include_router(authentication_router, prefix="/authentication")
 app.include_router(ingestion_router, prefix="/ingestion")
@@ -63,6 +71,16 @@ def health_check() -> dict[str, str]:
     헬스체크 엔드포인트입니다.
     """
     return {"status": "ok"}
+
+
+@app.post("/test")
+async def test_endpoint(request: Request):
+    """
+    불용어 처리 테스트 엔드포인트입니다.
+    """
+    data = await request.json()
+    print(f"data={data}")
+    return {"processed_text": data.get("text")}
 
 
 if __name__ == "__main__":
