@@ -90,6 +90,16 @@ class ContentRepositoryPort(ABC):
         raise NotImplementedError
 
     @abstractmethod
+    def fetch_popular_videos(self, limit: int = 5, platform: str | None = None) -> list[dict]:
+        """절대 인기 상위"""
+        raise NotImplementedError
+
+    @abstractmethod
+    def fetch_rising_videos(self, limit: int = 5, velocity_days: int = 1, platform: str | None = None) -> list[dict]:
+        """최근 증가량/가속도 기반 상위"""
+        raise NotImplementedError
+
+    @abstractmethod
     def fetch_recommended_videos_by_category(
         self, category: str, limit: int = 20, days: int = 14, platform: str | None = None
     ) -> list[dict]:

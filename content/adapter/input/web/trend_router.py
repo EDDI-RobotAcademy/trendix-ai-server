@@ -3,6 +3,7 @@ from fastapi.responses import JSONResponse
 from fastapi.encoders import jsonable_encoder
 
 from content.application.usecase.trend_query_usecase import TrendQueryUseCase
+from content.application.usecase.trend_featured_usecase import TrendFeaturedUseCase
 from content.infrastructure.repository.content_repository_impl import ContentRepositoryImpl
 
 trend_router = APIRouter(tags=["trends"])
@@ -10,6 +11,7 @@ trend_router = APIRouter(tags=["trends"])
 # 트렌드 탭 전용 조회용 유즈케이스/리포지토리 싱글턴
 repository = ContentRepositoryImpl()
 usecase = TrendQueryUseCase(repository)
+featured_usecase = TrendFeaturedUseCase(repository)
 
 
 @trend_router.get("/categories/hot")
@@ -53,3 +55,27 @@ async def list_categories(limit: int = Query(default=100, ge=1, le=500)):
     if not categories:
         raise HTTPException(status_code=404, detail="등록된 카테고리가 없습니다.")
     return JSONResponse(jsonable_encoder({"categories": categories}))
+
+
+@trend_router.get("/featured")
+async def get_featured_trends(
+    popular_limit: int = Query(default=5, ge=1, le=20),
+    rising_limit: int = Query(default=5, ge=1, le=20),
+    velocity_days: int = Query(default=1, ge=1, le=7),
+    platform: str | None = Query(default=None, description="플랫폼 필터 (예: youtube)"),
+):
+    """
+    인기(Popular)와 급상승(Rising) 후보를 분리해 반환한다.
+    - Popular: 절대 조회/점수 기반 상위 popular_limit
+    - Rising: 최근 증가량(velocity_days 기준) 상위 rising_limit
+    - categories: 최신 카테고리 트렌드 상위 5
+    """
+    result = featured_usecase.get_featured(
+        limit_popular=popular_limit,
+        limit_rising=rising_limit,
+        velocity_days=velocity_days,
+        platform=platform,
+    )
+    if not result["popular"] and not result["rising"]:
+        raise HTTPException(status_code=404, detail="추천할 데이터가 없습니다.")
+    return JSONResponse(jsonable_encoder(result))
