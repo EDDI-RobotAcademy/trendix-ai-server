@@ -73,7 +73,8 @@ CREATE TABLE video (
     like_count BIGINT,
     comment_count BIGINT,
     thumbnail_url VARCHAR(500),
-    crawled_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    crawled_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    is_shorts BOOLEAN
 );
 
 CREATE TABLE video_comment (

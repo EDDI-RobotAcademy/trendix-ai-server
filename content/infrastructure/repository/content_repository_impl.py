@@ -98,6 +98,7 @@ class ContentRepositoryImpl(ContentRepositoryPort):
             orm.published_at = video.published_at
             orm.duration = video.duration
             orm.thumbnail_url = video.thumbnail_url
+            orm.is_shorts = video.is_shorts
         # 한국어 주석: 기존 레코드는 변동성 필드(조회/좋아요/댓글 수, 최신 수집시각)만 갱신합니다.
         orm.view_count = video.view_count
         orm.like_count = video.like_count
@@ -572,3 +573,66 @@ class ContentRepositoryImpl(ContentRepositoryPort):
             {"limit": limit},
         ).scalars()
         return list(rows)
+
+    def get_recent_videos(self, platform: str = "youtube", hours: int = 24, limit: int = 50) -> list[Video]:
+        """최근 수집된 영상 목록 조회"""
+        try:
+            self.db.rollback()
+        except Exception:
+            pass
+            
+        cutoff_time = datetime.now() - timedelta(hours=hours)
+        
+        # TODO: is_shorts 컬럼이 데이터베이스에 추가되면 주석 해제
+        # SELECT에 is_shorts 포함시키기
+        try:
+            rows = self.db.execute(
+                text("""
+                    SELECT video_id, channel_id, platform, title, description, tags, 
+                           category_id, published_at, duration, view_count, like_count, 
+                           comment_count, thumbnail_url, crawled_at, is_shorts
+                    FROM video 
+                    WHERE platform = :platform 
+                      AND crawled_at >= :cutoff_time
+                    ORDER BY crawled_at DESC 
+                    LIMIT :limit
+                """),
+                {"platform": platform, "cutoff_time": cutoff_time, "limit": limit}
+            ).mappings().all()
+        except Exception:
+            # is_shorts 컬럼이 없는 경우 fallback
+            rows = self.db.execute(
+                text("""
+                    SELECT video_id, channel_id, platform, title, description, tags, 
+                           category_id, published_at, duration, view_count, like_count, 
+                           comment_count, thumbnail_url, crawled_at
+                    FROM video 
+                    WHERE platform = :platform 
+                      AND crawled_at >= :cutoff_time
+                    ORDER BY crawled_at DESC 
+                    LIMIT :limit
+                """),
+            {"platform": platform, "cutoff_time": cutoff_time, "limit": limit}
+        ).mappings().all()
+        
+        videos = []
+        for row in rows:
+            videos.append(Video(
+                video_id=row["video_id"],
+                channel_id=row["channel_id"],
+                platform=row["platform"],
+                title=row["title"],
+                description=row["description"],
+                tags=row["tags"],
+                category_id=row["category_id"],
+                published_at=row["published_at"],
+                duration=row["duration"],
+                view_count=row["view_count"],
+                like_count=row["like_count"],
+                comment_count=row["comment_count"],
+                thumbnail_url=row["thumbnail_url"],
+                crawled_at=row["crawled_at"],
+                is_shorts=row.get("is_shorts")  # 컬럼이 없는 경우 None
+            ))
+            
+        return videos
