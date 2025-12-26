@@ -484,6 +484,140 @@ class ContentRepositoryImpl(ContentRepositoryPort):
         ).mappings()
         return [dict(r) for r in rows]
 
+    def fetch_popular_videos(self, limit: int = 5, platform: str | None = None) -> list[dict]:
+        """
+        절대 인기 상위 리스트 (조회수 중심, 좋아요/스코어 보조).
+        채널 규모 편향 보정: 채널 평균 조회수를 나눈 정규화 점수를 함께 반환.
+        """
+        rows = self.db.execute(
+            text(
+                """
+                WITH base AS (
+                    SELECT
+                        v.*,
+                        vs.category,
+                        vs.sentiment_label,
+                        vs.sentiment_score,
+                        vs.trend_score,
+                        sc.engagement_score,
+                        sc.sentiment_score AS score_sentiment,
+                        sc.trend_score AS score_trend,
+                        sc.total_score,
+                        AVG(v.view_count) OVER (PARTITION BY v.channel_id) AS channel_avg_view
+                    FROM video v
+                    LEFT JOIN video_sentiment vs ON vs.video_id = v.video_id
+                    LEFT JOIN video_score sc ON sc.video_id = v.video_id
+                    WHERE (:platform IS NULL OR v.platform = :platform)
+                )
+                SELECT
+                    video_id,
+                    title,
+                    channel_id,
+                    platform,
+                    view_count,
+                    like_count,
+                    comment_count,
+                    published_at,
+                    thumbnail_url,
+                    category,
+                    sentiment_label,
+                    sentiment_score,
+                    trend_score,
+                    engagement_score,
+                    score_sentiment,
+                    score_trend,
+                    total_score,
+                    crawled_at,
+                    channel_avg_view,
+                    CASE
+                        WHEN channel_avg_view > 0 THEN view_count / channel_avg_view
+                        ELSE view_count
+                    END AS normalized_view_score
+                FROM base
+                ORDER BY normalized_view_score DESC NULLS LAST,
+                         COALESCE(total_score, view_count, score_sentiment, score_trend) DESC NULLS LAST,
+                         view_count DESC NULLS LAST,
+                         crawled_at DESC NULLS LAST
+                LIMIT :limit
+                """
+            ),
+            {"platform": platform, "limit": limit},
+        ).mappings()
+        return [dict(r) for r in rows]
+
+    def fetch_rising_videos(self, limit: int = 5, velocity_days: int = 1, platform: str | None = None) -> list[dict]:
+        """
+        최근 velocity(조회 증가량/일)를 기반한 급상승 리스트 + 채널 규모 보정 점수 포함.
+        """
+        rows = self.db.execute(
+            text(
+                """
+                WITH latest AS (
+                    SELECT
+                        v.video_id,
+                        v.title,
+                        v.channel_id,
+                        v.platform,
+                        v.view_count,
+                        v.like_count,
+                        v.comment_count,
+                        v.published_at,
+                        v.thumbnail_url,
+                        v.crawled_at,
+                        vs.category,
+                        vs.sentiment_label,
+                        vs.sentiment_score,
+                        vs.trend_score,
+                        sc.engagement_score,
+                        sc.sentiment_score AS score_sentiment,
+                        sc.trend_score AS score_trend,
+                        sc.total_score,
+                        AVG(v.view_count) OVER (PARTITION BY v.channel_id) AS channel_avg_view
+                    FROM video v
+                    LEFT JOIN video_sentiment vs ON vs.video_id = v.video_id
+                    LEFT JOIN video_score sc ON sc.video_id = v.video_id
+                    WHERE (:platform IS NULL OR v.platform = :platform)
+                ),
+                curr AS (
+                    SELECT DISTINCT ON (vms.video_id)
+                        vms.video_id,
+                        vms.view_count,
+                        vms.snapshot_date
+                    FROM video_metrics_snapshot vms
+                    WHERE (:platform IS NULL OR vms.platform = :platform)
+                    ORDER BY vms.video_id, vms.snapshot_date DESC
+                ),
+                prev AS (
+                    SELECT DISTINCT ON (vms.video_id)
+                        vms.video_id,
+                        vms.view_count,
+                        vms.snapshot_date
+                    FROM video_metrics_snapshot vms
+                    WHERE (:platform IS NULL OR vms.platform = :platform)
+                      AND vms.snapshot_date <= (CURRENT_DATE - (:velocity_days || ' days')::interval)
+                    ORDER BY vms.video_id, vms.snapshot_date DESC
+                )
+                SELECT
+                    l.*,
+                    GREATEST(COALESCE(c.view_count, l.view_count, 0) - COALESCE(p.view_count, 0), 0) / NULLIF(:velocity_days,0) AS view_velocity,
+                    CASE
+                        WHEN channel_avg_view > 0 THEN l.view_count / channel_avg_view
+                        ELSE l.view_count
+                    END AS normalized_view_score
+                FROM latest l
+                LEFT JOIN curr c ON c.video_id = l.video_id
+                LEFT JOIN prev p ON p.video_id = l.video_id
+                ORDER BY view_velocity DESC NULLS LAST,
+                         normalized_view_score DESC NULLS LAST,
+                         COALESCE(l.total_score, l.view_count) DESC NULLS LAST,
+                         l.crawled_at DESC NULLS LAST
+                LIMIT :limit
+                """
+            ),
+            {"platform": platform, "limit": limit, "velocity_days": velocity_days},
+        ).mappings()
+        return [dict(r) for r in rows]
+
     def fetch_recommended_videos_by_category(
         self, category: str, limit: int = 20, days: int = 14, platform: str | None = None
     ) -> list[dict]:
