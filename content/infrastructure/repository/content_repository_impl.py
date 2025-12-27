@@ -324,6 +324,49 @@ class ContentRepositoryImpl(ContentRepositoryPort):
         ).mappings()
         return [dict(row) for row in rows]
 
+    def fetch_videos_by_category_id(
+        self, category_id: int, limit: int = 10, platform: str | None = None
+    ) -> list[dict]:
+        """
+        YouTube category_id 기준 상위 콘텐츠를 조회한다.
+        - category_id: YouTube Data API의 숫자 categoryId (예: 10=Music, 20=Gaming)
+        """
+        rows = self.db.execute(
+            text(
+                """
+                SELECT
+                    v.video_id,
+                    v.title,
+                    v.channel_id,
+                    v.platform,
+                    v.view_count,
+                    v.like_count,
+                    v.comment_count,
+                    v.published_at,
+                    v.thumbnail_url,
+                    v.category_id,
+                    vs.category,
+                    vs.sentiment_label,
+                    vs.sentiment_score,
+                    vs.trend_score,
+                    sc.engagement_score,
+                    sc.sentiment_score AS score_sentiment,
+                    sc.trend_score AS score_trend,
+                    sc.total_score
+                FROM video v
+                LEFT JOIN video_sentiment vs ON vs.video_id = v.video_id
+                LEFT JOIN video_score sc ON sc.video_id = v.video_id
+                WHERE v.category_id = :category_id
+                  AND (:platform IS NULL OR v.platform = :platform)
+                ORDER BY COALESCE(sc.total_score, sc.sentiment_score, sc.trend_score, v.view_count) DESC NULLS LAST,
+                         v.crawled_at DESC
+                LIMIT :limit
+                """
+            ),
+            {"category_id": category_id, "platform": platform, "limit": limit},
+        ).mappings()
+        return [dict(row) for row in rows]
+
     def fetch_videos_by_keyword(self, keyword: str, limit: int = 20) -> list[dict]:
         """
         키워드 기준 상위 콘텐츠를 점수/조회수 기반으로 조회한다.
@@ -619,7 +662,7 @@ class ContentRepositoryImpl(ContentRepositoryPort):
         return [dict(r) for r in rows]
 
     def fetch_recommended_videos_by_category(
-        self, category: str, limit: int = 20, days: int = 14, platform: str | None = None
+        self, category_id: int, limit: int = 20, days: int = 14, platform: str | None = None
     ) -> list[dict]:
         """
         카테고리 내 최근 수집 콘텐츠를 점수 기반으로 추천한다.
@@ -661,12 +704,12 @@ class ContentRepositoryImpl(ContentRepositoryPort):
                         ELSE '@' || COALESCE(ca.username, ca.display_name, ch.title, v.channel_id)
                     END AS channel_username
                 FROM video v
-                JOIN video_sentiment vs ON vs.video_id = v.video_id
+                LEFT JOIN video_sentiment vs ON vs.video_id = v.video_id
                 LEFT JOIN video_score sc ON sc.video_id = v.video_id
                 LEFT JOIN creator_account ca ON ca.account_id = v.channel_id AND ca.platform = v.platform
                 LEFT JOIN channel ch ON ch.channel_id = v.channel_id
-                WHERE vs.category = :category
-                AND v.published_at::date BETWEEN :since_date AND :until_date
+                WHERE v.category_id = :category_id
+                  AND v.published_at::date BETWEEN :since_date AND :until_date
                   AND (:platform IS NULL OR v.platform = :platform)
                 ORDER BY COALESCE(sc.total_score, sc.sentiment_score, sc.trend_score, v.view_count) DESC NULLS LAST,
                          v.crawled_at DESC
@@ -674,7 +717,7 @@ class ContentRepositoryImpl(ContentRepositoryPort):
                 """
             ),
             {
-                "category": category,
+                "category_id": category_id,
                 "since_date": since_date,
                 "until_date": until_date,
                 "platform": platform,

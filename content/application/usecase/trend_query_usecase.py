@@ -10,10 +10,10 @@ class TrendQueryUseCase:
         return self.repository.fetch_hot_category_trends(platform=platform, limit=limit)
 
     def get_recommended_contents(
-        self, category: str, limit: int = 20, days: int = 14, platform: str | None = None
+        self, category_id: int, limit: int = 20, days: int = 14, platform: str | None = None
     ) -> list[dict]:
         return self.repository.fetch_recommended_videos_by_category(
-            category=category, limit=limit, days=days, platform=platform
+            category_id=category_id, limit=limit, days=days, platform=platform
         )
 
     def get_categories(self, limit: int = 100) -> list[str]:
