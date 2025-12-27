@@ -555,6 +555,10 @@ class ContentRepositoryImpl(ContentRepositoryPort):
                 SELECT
                     video_id,
                     title,
+                    description,
+                    tags,
+                    category_id,
+                    duration,
                     channel_id,
                     platform,
                     view_count,
@@ -571,6 +575,7 @@ class ContentRepositoryImpl(ContentRepositoryPort):
                     score_trend,
                     total_score,
                     crawled_at,
+                    is_shorts,
                     channel_avg_view,
                     CASE
                         WHEN channel_avg_view > 0 THEN view_count / channel_avg_view
@@ -599,6 +604,10 @@ class ContentRepositoryImpl(ContentRepositoryPort):
                     SELECT
                         v.video_id,
                         v.title,
+                        v.description,
+                        v.tags,
+                        v.category_id,
+                        v.duration,
                         v.channel_id,
                         v.platform,
                         v.view_count,
@@ -615,6 +624,7 @@ class ContentRepositoryImpl(ContentRepositoryPort):
                         sc.sentiment_score AS score_sentiment,
                         sc.trend_score AS score_trend,
                         sc.total_score,
+                        v.is_shorts,
                         AVG(v.view_count) OVER (PARTITION BY v.channel_id) AS channel_avg_view
                     FROM video v
                     LEFT JOIN video_sentiment vs ON vs.video_id = v.video_id
@@ -682,6 +692,10 @@ class ContentRepositoryImpl(ContentRepositoryPort):
                 SELECT
                     v.video_id,
                     v.title,
+                    v.description,
+                    v.tags,
+                    v.category_id,
+                    v.duration,
                     v.channel_id,
                     v.platform,
                     v.view_count,
@@ -689,6 +703,8 @@ class ContentRepositoryImpl(ContentRepositoryPort):
                     v.comment_count,
                     v.published_at,
                     v.thumbnail_url,
+                    v.crawled_at,
+                    v.is_shorts,
                     vs.category,
                     vs.sentiment_label,
                     vs.sentiment_score,
@@ -697,7 +713,6 @@ class ContentRepositoryImpl(ContentRepositoryPort):
                     sc.sentiment_score AS score_sentiment,
                     sc.trend_score AS score_trend,
                     sc.total_score,
-                    v.crawled_at,
                     -- username(또는 display_name/title)을 단 한 번만 @로 prefix 하여 프런트에 바로 전달
                     CASE
                         WHEN COALESCE(ca.username, ca.display_name, ch.title, v.channel_id) LIKE '@%' THEN COALESCE(ca.username, ca.display_name, ch.title, v.channel_id)
@@ -773,6 +788,10 @@ class ContentRepositoryImpl(ContentRepositoryPort):
                 SELECT
                     v.video_id,
                     v.title,
+                    v.description,
+                    v.tags,
+                    v.category_id,
+                    v.duration,
                     v.channel_id,
                     v.platform,
                     vs.category,
@@ -788,7 +807,8 @@ class ContentRepositoryImpl(ContentRepositoryPort):
                     COALESCE(sc.total_score, sc.sentiment_score, sc.trend_score, 0) AS total_score,
                     v.published_at,
                     v.thumbnail_url,
-                    v.crawled_at
+                    v.crawled_at,
+                    v.is_shorts
                 FROM video v
                 LEFT JOIN video_sentiment vs ON vs.video_id = v.video_id
                 LEFT JOIN video_score sc ON sc.video_id = v.video_id
