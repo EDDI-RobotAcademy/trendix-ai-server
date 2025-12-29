@@ -13,6 +13,8 @@ from content.adapter.input.web.chat_router import chat_router
 from content.adapter.input.web.trend_router import trend_router
 from social_oauth.adapter.input.web.google_oauth2_router import authentication_router
 from app.batch.trend_batch import start_trend_scheduler
+from app.batch.trending_videos_batch import start_trending_videos_scheduler
+from app.batch.youtube_tag_batch import start_youtube_tag_scheduler
 from config.database.session import init_db_schema
 from social_oauth.adapter.input.web.logout_router import logout_router
 
@@ -32,13 +34,20 @@ async def lifespan(app: FastAPI):
     """
     # DB 스키마 미존재 시 자동 생성하여 UndefinedTable 오류를 예방합니다.
     init_db_schema()
+    
+    # 배치 스케줄러들을 시작합니다.
     app.state.trend_task = asyncio.create_task(start_trend_scheduler())
+    app.state.trending_videos_task = asyncio.create_task(start_trending_videos_scheduler())
+    app.state.youtube_tag_task = asyncio.create_task(start_youtube_tag_scheduler())
+    
     try:
         yield
     finally:
-        task = getattr(app.state, "trend_task", None)
-        if task:
-            task.cancel()
+        # 모든 배치 태스크 정리
+        for task_name in ["trend_task", "trending_videos_task", "youtube_tag_task"]:
+            task = getattr(app.state, task_name, None)
+            if task:
+                task.cancel()
 
 
 app = FastAPI(title="Apple Mango AI Server", version="0.1.0", lifespan=lifespan)

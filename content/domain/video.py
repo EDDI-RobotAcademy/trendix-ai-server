@@ -19,6 +19,7 @@ class Video:
     comment_count: Optional[int] = None
     thumbnail_url: Optional[str] = None
     crawled_at: Optional[datetime] = None
+    is_shorts: Optional[bool] = None
 
     @classmethod
     def from_platform(cls, payload: dict) -> "Video":
@@ -37,4 +38,5 @@ class Video:
             comment_count=payload.get("comment_count"),
             thumbnail_url=payload.get("thumbnail_url"),
             crawled_at=payload.get("crawled_at"),
+            is_shorts=payload.get("is_shorts"),
         )
