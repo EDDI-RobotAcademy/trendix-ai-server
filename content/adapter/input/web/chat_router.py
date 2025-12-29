@@ -145,7 +145,7 @@ async def chat_stream(request_body: ChatRequest, request: Request):
                     velocity_days=request_body.velocity_days,
                     platform=request_body.platform,
                 )
-                yield f"data: {json.dumps({"videos" : relevant}, ensure_ascii=False)}\n\n"
+                yield f"data: {json.dumps({'videos' : relevant}, ensure_ascii=False)}\n\n"
                 # data = f"data: {json.dumps({'content': reply, 'relevant': relevant}, ensure_ascii=False)}\n\n"
                 # yield data
                 # yield "data: [DONE]\n\n"

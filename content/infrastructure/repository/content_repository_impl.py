@@ -832,11 +832,17 @@ class ContentRepositoryImpl(ContentRepositoryPort):
                 ) prev ON true
                 WHERE COALESCE(v.published_at::date, v.crawled_at::date) BETWEEN :from_date AND :to_date
                   AND (:platform IS NULL OR v.platform = :platform)
-                ORDER BY view_velocity DESC NULLS LAST,
-                         comment_velocity DESC NULLS LAST,
-                         like_velocity DESC NULLS LAST,
-                         total_score DESC NULLS LAST,
-                         v.crawled_at DESC NULLS LAST
+                ORDER BY 
+                    -- 최우선: velocity가 있는 영상들을 상위에 배치
+                    CASE WHEN COALESCE(curr.view_count, v.view_count, 0) - COALESCE(prev.view_count, 0) > 0 THEN 1 ELSE 0 END DESC,
+                    -- velocity 기반 정렬
+                    view_velocity DESC NULLS LAST,
+                    comment_velocity DESC NULLS LAST, 
+                    like_velocity DESC NULLS LAST,
+                    -- fallback: velocity 데이터가 없는 경우 절대값 기준
+                    COALESCE(curr.view_count, v.view_count, 0) DESC,
+                    total_score DESC NULLS LAST,
+                    v.published_at DESC NULLS LAST
                 LIMIT :limit
                 """
             ),
@@ -852,7 +858,7 @@ class ContentRepositoryImpl(ContentRepositoryPort):
 
         now = datetime.utcnow()
         result: list[dict] = []
-        for r in rows:
+        for rank, r in enumerate(rows, 1):
             view_now = int(r["view_count"] or 0)
             view_prev = int(r["view_count_prev"] or 0)
             delta_views = view_now - view_prev
@@ -872,8 +878,13 @@ class ContentRepositoryImpl(ContentRepositoryPort):
             item["growth_rate_window"] = float(growth_rate)
             item["age_minutes"] = age_minutes
             item["age_hours"] = age_hours
-            # 간단한 급등 점수: 단기 증가율 * log(현재 조회수 + 10) 형태 등으로 확장 가능
-            item["surge_score"] = growth_rate
+            # 개선된 급등 점수: 증가율 + 절대 증가량 + 현재 인기도 종합 고려
+            import math
+            base_popularity = math.log(max(view_now, 1) + 10)  # 현재 인기도 (로그 스케일)
+            velocity_factor = float(r["view_velocity"] or 0) / 1000.0  # 시간당 증가량 정규화
+            surge_score = (growth_rate * 100) + velocity_factor + (base_popularity * 0.1)
+            item["surge_score"] = round(surge_score, 2)
+            item["trending_rank"] = rank  # 백엔드에서 정렬된 순위 정보 추가
             result.append(item)
 
         return result
