@@ -877,8 +877,11 @@ class ContentRepositoryImpl(ContentRepositoryPort):
             },
         ).mappings()
 
+        import math
+        
         now = datetime.utcnow()
         result: list[dict] = []
+        
         for rank, r in enumerate(rows, 1):
             view_now = int(r["view_count"] or 0)
             view_prev = int(r["view_count_prev"] or 0)
@@ -887,25 +890,94 @@ class ContentRepositoryImpl(ContentRepositoryPort):
             growth_rate = delta_views / base_views if (view_now or view_prev) else 0.0
 
             published_at = r.get("published_at")
+            
+            # === 업로드 경과 시간(Freshness) 계산 ===
             if published_at is not None:
-                age_minutes = max((now - published_at).total_seconds() / 60.0, 0.0)
+                # 현재 시각 - 업로드 시각 = 경과 시간
+                time_elapsed = now - published_at
+                age_seconds = max(time_elapsed.total_seconds(), 0.0)
+                age_minutes = age_seconds / 60.0
                 age_hours = age_minutes / 60.0
+                age_days = age_hours / 24.0
+                
+                # Freshness Score: 최신 콘텐츠일수록 높은 점수
+                # 지수 감쇠 함수 사용: freshness = exp(-λ * age_hours)
+                # λ = 0.05 → 24시간 후 약 0.30, 48시간 후 약 0.09
+                freshness_decay_rate = 0.05
+                freshness_score = math.exp(-freshness_decay_rate * age_hours)
+                
+                # 추가 보너스: 24시간 이내 업로드는 추가 가중치
+                if age_hours <= 24:
+                    freshness_bonus = 1.5
+                elif age_hours <= 48:
+                    freshness_bonus = 1.2
+                elif age_hours <= 72:
+                    freshness_bonus = 1.1
+                else:
+                    freshness_bonus = 1.0
+                
+                freshness_score_with_bonus = freshness_score * freshness_bonus
             else:
+                # 업로드 시각이 없는 경우 기본값
+                age_seconds = None
                 age_minutes = None
                 age_hours = None
+                age_days = None
+                freshness_score = 0.5  # 중간 값
+                freshness_bonus = 1.0
+                freshness_score_with_bonus = 0.5
 
             item = dict(r)
-            item["delta_views_window"] = float(delta_views)
-            item["growth_rate_window"] = float(growth_rate)
+            
+            # 경과 시간 정보
+            item["age_seconds"] = age_seconds
             item["age_minutes"] = age_minutes
             item["age_hours"] = age_hours
-            # 개선된 급등 점수: 증가율 + 절대 증가량 + 현재 인기도 종합 고려
-            import math
-            base_popularity = math.log(max(view_now, 1) + 10)  # 현재 인기도 (로그 스케일)
-            velocity_factor = float(r["view_velocity"] or 0) / 1000.0  # 시간당 증가량 정규화
-            surge_score = (growth_rate * 100) + velocity_factor + (base_popularity * 0.1)
+            item["age_days"] = age_days
+            
+            # Freshness 점수
+            item["freshness_score"] = round(freshness_score, 4)
+            item["freshness_bonus"] = freshness_bonus
+            item["freshness_score_with_bonus"] = round(freshness_score_with_bonus, 4)
+            
+            # 증가 지표
+            item["delta_views_window"] = float(delta_views)
+            item["growth_rate_window"] = float(growth_rate)
+            
+            item["age_minutes"] = age_minutes
+            item["age_hours"] = age_hours
+            # === 개선된 급등 점수(Surge Score) 계산 ===
+            # 요소 1: 현재 인기도 (로그 스케일)
+            base_popularity = math.log(max(view_now, 1) + 10)
+            
+            # 요소 2: 시간당 증가량 (velocity) 정규화
+            velocity_factor = float(r["view_velocity"] or 0) / 1000.0
+            
+            # 요소 3: 성장률 (growth_rate) - 백분율로 변환
+            growth_factor = growth_rate * 100
+            
+            # 요소 4: Freshness - 최신 콘텐츠에 가중치
+            freshness_factor = freshness_score_with_bonus * 50  # 0~75 범위로 스케일링
+            
+            # 최종 Surge Score = 성장률 + velocity + 인기도 + Freshness
+            surge_score = (
+                growth_factor +           # 성장률 기여도
+                velocity_factor +         # 절대 증가량 기여도
+                (base_popularity * 0.1) + # 현재 인기도 기여도
+                freshness_factor          # 신선도 기여도
+            )
+            
             item["surge_score"] = round(surge_score, 2)
-            item["trending_rank"] = rank  # 백엔드에서 정렬된 순위 정보 추가
+            item["trending_rank"] = rank  # 백엔드에서 정렬된 순위
+            
+            # 디버깅/분석용 세부 점수
+            item["surge_components"] = {
+                "growth_factor": round(growth_factor, 2),
+                "velocity_factor": round(velocity_factor, 2),
+                "popularity_factor": round(base_popularity * 0.1, 2),
+                "freshness_factor": round(freshness_factor, 2),
+            }
+            
             result.append(item)
 
         return result
