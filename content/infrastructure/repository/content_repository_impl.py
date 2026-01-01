@@ -1,4 +1,4 @@
-from typing import Iterable
+from typing import Any, Iterable
 from datetime import datetime, timedelta
 
 from sqlalchemy import text
@@ -303,6 +303,7 @@ class ContentRepositoryImpl(ContentRepositoryPort):
                     v.comment_count,
                     v.published_at,
                     v.thumbnail_url,
+                    v.category_id,
                     vs.category,
                     vs.sentiment_label,
                     vs.sentiment_score,
@@ -325,18 +326,29 @@ class ContentRepositoryImpl(ContentRepositoryPort):
         return [dict(row) for row in rows]
 
     def fetch_videos_by_category_id(
-        self, category_id: int, limit: int = 10, platform: str | None = None
+        self, category_id: int, limit: int = 10, platform: str | None = None, days: int | None = None
     ) -> list[dict]:
         """
         YouTube category_id 기준 상위 콘텐츠를 조회한다.
         - category_id: YouTube Data API의 숫자 categoryId (예: 10=Music, 20=Gaming)
+        - days: 최근 N일 내 게시된 영상만 대상 (None이면 전체)
         """
+        since_date = None
+        until_date = None
+        if days is not None:
+            since_date = (datetime.utcnow() - timedelta(days=days)).date()
+            until_date = datetime.utcnow().date()
+        
         rows = self.db.execute(
             text(
                 """
                 SELECT
                     v.video_id,
                     v.title,
+                    v.description,
+                    v.tags,
+                    v.category_id,
+                    v.duration,
                     v.channel_id,
                     v.platform,
                     v.view_count,
@@ -344,7 +356,8 @@ class ContentRepositoryImpl(ContentRepositoryPort):
                     v.comment_count,
                     v.published_at,
                     v.thumbnail_url,
-                    v.category_id,
+                    v.crawled_at,
+                    v.is_shorts,
                     vs.category,
                     vs.sentiment_label,
                     vs.sentiment_score,
@@ -358,12 +371,20 @@ class ContentRepositoryImpl(ContentRepositoryPort):
                 LEFT JOIN video_score sc ON sc.video_id = v.video_id
                 WHERE v.category_id = :category_id
                   AND (:platform IS NULL OR v.platform = :platform)
+                  AND (:since_date IS NULL OR v.published_at::date >= :since_date)
+                  AND (:until_date IS NULL OR v.published_at::date <= :until_date)
                 ORDER BY COALESCE(sc.total_score, sc.sentiment_score, sc.trend_score, v.view_count) DESC NULLS LAST,
                          v.crawled_at DESC
                 LIMIT :limit
                 """
             ),
-            {"category_id": category_id, "platform": platform, "limit": limit},
+            {
+                "category_id": category_id,
+                "platform": platform,
+                "limit": limit,
+                "since_date": since_date,
+                "until_date": until_date,
+            },
         ).mappings()
         return [dict(row) for row in rows]
 
@@ -672,10 +693,10 @@ class ContentRepositoryImpl(ContentRepositoryPort):
         return [dict(r) for r in rows]
 
     def fetch_recommended_videos_by_category(
-        self, category_id: int, limit: int = 20, days: int = 14, platform: str | None = None
+        self, category: str, limit: int = 20, days: int = 14, platform: str | None = None
     ) -> list[dict]:
         """
-        카테고리 내 최근 수집 콘텐츠를 점수 기반으로 추천한다.
+        카테고리 문자열(category) 기준으로 최근 수집 콘텐츠를 점수 기반으로 추천한다.
         """
         # 이전 예외로 인한 pending rollback 상태 방지
         try:
@@ -723,7 +744,7 @@ class ContentRepositoryImpl(ContentRepositoryPort):
                 LEFT JOIN video_score sc ON sc.video_id = v.video_id
                 LEFT JOIN creator_account ca ON ca.account_id = v.channel_id AND ca.platform = v.platform
                 LEFT JOIN channel ch ON ch.channel_id = v.channel_id
-                WHERE v.category_id = :category_id
+                WHERE vs.category = :category
                   AND v.published_at::date BETWEEN :since_date AND :until_date
                   AND (:platform IS NULL OR v.platform = :platform)
                 ORDER BY COALESCE(sc.total_score, sc.sentiment_score, sc.trend_score, v.view_count) DESC NULLS LAST,
@@ -732,7 +753,7 @@ class ContentRepositoryImpl(ContentRepositoryPort):
                 """
             ),
             {
-                "category_id": category_id,
+                "category": category,
                 "since_date": since_date,
                 "until_date": until_date,
                 "platform": platform,
@@ -856,8 +877,11 @@ class ContentRepositoryImpl(ContentRepositoryPort):
             },
         ).mappings()
 
+        import math
+        
         now = datetime.utcnow()
         result: list[dict] = []
+        
         for rank, r in enumerate(rows, 1):
             view_now = int(r["view_count"] or 0)
             view_prev = int(r["view_count_prev"] or 0)
@@ -866,25 +890,94 @@ class ContentRepositoryImpl(ContentRepositoryPort):
             growth_rate = delta_views / base_views if (view_now or view_prev) else 0.0
 
             published_at = r.get("published_at")
+            
+            # === 업로드 경과 시간(Freshness) 계산 ===
             if published_at is not None:
-                age_minutes = max((now - published_at).total_seconds() / 60.0, 0.0)
+                # 현재 시각 - 업로드 시각 = 경과 시간
+                time_elapsed = now - published_at
+                age_seconds = max(time_elapsed.total_seconds(), 0.0)
+                age_minutes = age_seconds / 60.0
                 age_hours = age_minutes / 60.0
+                age_days = age_hours / 24.0
+                
+                # Freshness Score: 최신 콘텐츠일수록 높은 점수
+                # 지수 감쇠 함수 사용: freshness = exp(-λ * age_hours)
+                # λ = 0.05 → 24시간 후 약 0.30, 48시간 후 약 0.09
+                freshness_decay_rate = 0.05
+                freshness_score = math.exp(-freshness_decay_rate * age_hours)
+                
+                # 추가 보너스: 24시간 이내 업로드는 추가 가중치
+                if age_hours <= 24:
+                    freshness_bonus = 1.5
+                elif age_hours <= 48:
+                    freshness_bonus = 1.2
+                elif age_hours <= 72:
+                    freshness_bonus = 1.1
+                else:
+                    freshness_bonus = 1.0
+                
+                freshness_score_with_bonus = freshness_score * freshness_bonus
             else:
+                # 업로드 시각이 없는 경우 기본값
+                age_seconds = None
                 age_minutes = None
                 age_hours = None
+                age_days = None
+                freshness_score = 0.5  # 중간 값
+                freshness_bonus = 1.0
+                freshness_score_with_bonus = 0.5
 
             item = dict(r)
-            item["delta_views_window"] = float(delta_views)
-            item["growth_rate_window"] = float(growth_rate)
+            
+            # 경과 시간 정보
+            item["age_seconds"] = age_seconds
             item["age_minutes"] = age_minutes
             item["age_hours"] = age_hours
-            # 개선된 급등 점수: 증가율 + 절대 증가량 + 현재 인기도 종합 고려
-            import math
-            base_popularity = math.log(max(view_now, 1) + 10)  # 현재 인기도 (로그 스케일)
-            velocity_factor = float(r["view_velocity"] or 0) / 1000.0  # 시간당 증가량 정규화
-            surge_score = (growth_rate * 100) + velocity_factor + (base_popularity * 0.1)
+            item["age_days"] = age_days
+            
+            # Freshness 점수
+            item["freshness_score"] = round(freshness_score, 4)
+            item["freshness_bonus"] = freshness_bonus
+            item["freshness_score_with_bonus"] = round(freshness_score_with_bonus, 4)
+            
+            # 증가 지표
+            item["delta_views_window"] = float(delta_views)
+            item["growth_rate_window"] = float(growth_rate)
+            
+            item["age_minutes"] = age_minutes
+            item["age_hours"] = age_hours
+            # === 개선된 급등 점수(Surge Score) 계산 ===
+            # 요소 1: 현재 인기도 (로그 스케일)
+            base_popularity = math.log(max(view_now, 1) + 10)
+            
+            # 요소 2: 시간당 증가량 (velocity) 정규화
+            velocity_factor = float(r["view_velocity"] or 0) / 1000.0
+            
+            # 요소 3: 성장률 (growth_rate) - 백분율로 변환
+            growth_factor = growth_rate * 100
+            
+            # 요소 4: Freshness - 최신 콘텐츠에 가중치
+            freshness_factor = freshness_score_with_bonus * 50  # 0~75 범위로 스케일링
+            
+            # 최종 Surge Score = 성장률 + velocity + 인기도 + Freshness
+            surge_score = (
+                growth_factor +           # 성장률 기여도
+                velocity_factor +         # 절대 증가량 기여도
+                (base_popularity * 0.1) + # 현재 인기도 기여도
+                freshness_factor          # 신선도 기여도
+            )
+            
             item["surge_score"] = round(surge_score, 2)
-            item["trending_rank"] = rank  # 백엔드에서 정렬된 순위 정보 추가
+            item["trending_rank"] = rank  # 백엔드에서 정렬된 순위
+            
+            # 디버깅/분석용 세부 점수
+            item["surge_components"] = {
+                "growth_factor": round(growth_factor, 2),
+                "velocity_factor": round(velocity_factor, 2),
+                "popularity_factor": round(base_popularity * 0.1, 2),
+                "freshness_factor": round(freshness_factor, 2),
+            }
+            
             result.append(item)
 
         return result

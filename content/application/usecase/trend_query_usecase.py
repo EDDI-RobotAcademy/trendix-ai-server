@@ -10,10 +10,10 @@ class TrendQueryUseCase:
         return self.repository.fetch_hot_category_trends(platform=platform, limit=limit)
 
     def get_recommended_contents(
-        self, category_id: int, limit: int = 20, days: int = 14, platform: str | None = None
+        self, category: str, limit: int = 20, days: int = 14, platform: str | None = None
     ) -> list[dict]:
         return self.repository.fetch_recommended_videos_by_category(
-            category_id=category_id, limit=limit, days=days, platform=platform
+            category=category, limit=limit, days=days, platform=platform
         )
 
     def get_categories(self, limit: int = 100) -> list[str]:
@@ -36,4 +36,23 @@ class TrendQueryUseCase:
         """
         return self.repository.fetch_surge_videos(
             platform=platform, limit=limit, days=days, velocity_days=velocity_days
+        )
+
+    def get_videos_by_category_id(
+        self,
+        category_id: int,
+        limit: int = 20,
+        days: int = 14,
+        platform: str | None = None,
+    ) -> list[dict]:
+        """
+        category_id 기준으로 최근 N일 내 영상 리스트를 조회한다.
+
+        - category_id: YouTube 카테고리 ID (숫자)
+        - limit: 상위 N개
+        - days: 최근 N일 내 게시된 영상만 대상
+        - platform: youtube 등 플랫폼 필터
+        """
+        return self.repository.fetch_videos_by_category_id(
+            category_id=category_id, limit=limit, platform=platform, days=days
         )
