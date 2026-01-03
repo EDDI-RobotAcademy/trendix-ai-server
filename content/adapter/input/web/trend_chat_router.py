@@ -39,13 +39,14 @@ async def chat_with_trends(
     트렌드 데이터를 컨텍스트로 주입해 답변하는 전용 챗 엔드포인트.
     """
     try:
-        reply = trend_chat_usecase.answer_with_trends(
+        result = trend_chat_usecase.answer_with_trends(
             user_messages=[m.model_dump() for m in request.messages],
             popular_limit=request.popular_limit,
             rising_limit=request.rising_limit,
             velocity_days=request.velocity_days,
             platform=request.platform,
         )
+        reply = result[0] if isinstance(result, (list, tuple)) else result
     except ValueError as exc:
         raise HTTPException(status_code=500, detail=str(exc))
     except Exception as exc:  # OpenAI 예외 일괄 처리

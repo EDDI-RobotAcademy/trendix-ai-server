@@ -9,7 +9,7 @@ class TopicQueryUseCase:
     def query_by_category(self, category: str, limit_videos: int = 20, limit_keywords: int = 10) -> dict:
         videos = self.repository.fetch_videos_by_category(category, limit=limit_videos)
         keywords = self.repository.fetch_top_keywords_by_category(category, limit=limit_keywords)
-        return {"category": category, "videos": videos, "keywords": keywords}
+        return {"category": category, "videos": videos, "keywords": keywords}#lee
 
     def query_by_keyword(self, keyword: str, limit_videos: int = 20, limit_keywords: int = 10) -> dict:
         videos = self.repository.fetch_videos_by_keyword(keyword, limit=limit_videos)

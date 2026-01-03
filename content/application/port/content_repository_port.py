@@ -103,8 +103,41 @@ class ContentRepositoryPort(ABC):
     def fetch_recommended_videos_by_category(
         self, category: str, limit: int = 20, days: int = 14, platform: str | None = None
     ) -> list[dict]:
+        """
+        카테고리 문자열(category) 기준으로 최근 N일 내 추천 영상을 조회한다.
+        """
         raise NotImplementedError
 
     @abstractmethod
     def fetch_distinct_categories(self, limit: int = 100) -> list[str]:
+        raise NotImplementedError
+
+    @abstractmethod
+    def fetch_surge_videos(
+        self,
+        platform: str | None = None,
+        limit: int = 30,
+        days: int = 3,
+        velocity_days: int = 1,
+    ) -> list[dict]:
+        """
+        단기 조회수 증가량/증가율을 기준으로 급등 영상 랭킹 리스트를 조회한다.
+
+        - days: 최근 N일 내 업로드/수집된 영상만 대상
+        - velocity_days: 이전 스냅샷 기준 일수 (예: 1일 전과 비교)
+        """
+        raise NotImplementedError
+
+    @abstractmethod
+    def fetch_videos_by_category_id(
+        self,
+        category_id: int,
+        limit: int = 10,
+        platform: str | None = None,
+        days: int | None = None,
+    ) -> list[dict]:
+        """
+        YouTube category_id 기준으로 상위 영상 리스트를 조회한다.
+        - days: 최근 N일 내 게시된 영상만 대상 (None이면 전체)
+        """
         raise NotImplementedError

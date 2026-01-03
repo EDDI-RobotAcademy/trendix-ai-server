@@ -237,6 +237,83 @@ class YouTubeClient(PlatformClientPort):
 
         return ids
 
+    def fetch_trending_videos(self, max_results: int = 50, region_code: str = "KR") -> Iterable[Video]:
+        """
+        YouTube 인기 급상승 영상을 조회합니다.
+        """
+        try:
+            response = (
+                self.service.videos()
+                .list(
+                    part="snippet,contentDetails,statistics",
+                    chart="mostPopular",
+                    regionCode=region_code,
+                    maxResults=min(max_results, 50),
+                )
+                .execute()
+            )
+        except HttpError as exc:
+            raise RuntimeError(f"YouTube trending videos fetch failed: {exc}") from exc
+
+        for item in response.get("items", []):
+            snippet = item["snippet"]
+            stats = item.get("statistics", {})
+            content = item.get("contentDetails", {})
+            yield Video(
+                video_id=item["id"],
+                channel_id=snippet["channelId"],
+                platform=self.platform,
+                title=snippet.get("title", ""),
+                description=snippet.get("description"),
+                tags=",".join(snippet.get("tags", [])) if snippet.get("tags") else None,
+                category_id=int(snippet.get("categoryId")) if snippet.get("categoryId") else None,
+                published_at=self._parse_datetime(snippet.get("publishedAt")),
+                duration=content.get("duration"),
+                view_count=int(stats.get("viewCount", 0)),
+                like_count=int(stats.get("likeCount", 0)) if stats.get("likeCount") else 0,
+                comment_count=int(stats.get("commentCount", 0)) if stats.get("commentCount") else 0,
+                thumbnail_url=(snippet.get("thumbnails", {}).get("high") or {}).get("url"),
+            )
+
+    def fetch_popular_videos_by_category(self, category_id: str, max_results: int = 25, region_code: str = "KR") -> Iterable[Video]:
+        """
+        특정 카테고리의 인기 영상을 조회합니다.
+        """
+        try:
+            response = (
+                self.service.videos()
+                .list(
+                    part="snippet,contentDetails,statistics",
+                    chart="mostPopular",
+                    videoCategoryId=category_id,
+                    regionCode=region_code,
+                    maxResults=min(max_results, 50),
+                )
+                .execute()
+            )
+        except HttpError as exc:
+            raise RuntimeError(f"YouTube category videos fetch failed: {exc}") from exc
+
+        for item in response.get("items", []):
+            snippet = item["snippet"]
+            stats = item.get("statistics", {})
+            content = item.get("contentDetails", {})
+            yield Video(
+                video_id=item["id"],
+                channel_id=snippet["channelId"],
+                platform=self.platform,
+                title=snippet.get("title", ""),
+                description=snippet.get("description"),
+                tags=",".join(snippet.get("tags", [])) if snippet.get("tags") else None,
+                category_id=int(snippet.get("categoryId")) if snippet.get("categoryId") else None,
+                published_at=self._parse_datetime(snippet.get("publishedAt")),
+                duration=content.get("duration"),
+                view_count=int(stats.get("viewCount", 0)),
+                like_count=int(stats.get("likeCount", 0)) if stats.get("likeCount") else 0,
+                comment_count=int(stats.get("commentCount", 0)) if stats.get("commentCount") else 0,
+                thumbnail_url=(snippet.get("thumbnails", {}).get("high") or {}).get("url"),
+            )
+
     @staticmethod
     def _parse_datetime(value: str | None):
         if not value:

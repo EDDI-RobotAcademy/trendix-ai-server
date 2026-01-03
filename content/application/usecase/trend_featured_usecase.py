@@ -130,7 +130,7 @@ class TrendFeaturedUseCase:
         return " ".join(p for p in parts if p)
 
     @staticmethod
-    def _summarize_trends(self, categories: List[dict]) -> str:
+    def _summarize_trends(categories: List[dict]) -> str:
         if not categories:
             return "트렌드 데이터가 부족합니다."
         top = categories[:3]
