@@ -52,6 +52,24 @@ class StopwordUseCase:
 
         return text
 
+    def remove_stopwords_iterative(self, data):
+        stack = [data]
+        while stack:
+            item = stack.pop()
+            if isinstance(item, dict):
+                for k, v in item.items():
+                    if isinstance(v, (dict, list)):
+                        stack.append(v)
+                    elif isinstance(v, str):
+                        item[k] = self.remove_stopwords(v)
+            elif isinstance(item, list):
+                for i, v in enumerate(item):
+                    if isinstance(v, (dict, list)):
+                        stack.append(v)
+                    elif isinstance(v, str):
+                        item[i] = self.remove_stopwords(v)
+        return data        
+        
     def remove_stopwords(self, text: str) -> str:
         """
         불용어 제거 (단어 단위)
@@ -66,6 +84,7 @@ class StopwordUseCase:
 
         # 불용어를 빈 문자열로 치환
         result = re.sub(pattern, '', text)
+        print(f"texts={text}, result={result}")
         return result
 
     def preprocess(self, text: str) -> str:
