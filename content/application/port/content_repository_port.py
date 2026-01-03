@@ -141,3 +141,16 @@ class ContentRepositoryPort(ABC):
         - days: 최근 N일 내 게시된 영상만 대상 (None이면 전체)
         """
         raise NotImplementedError
+
+    @abstractmethod
+    def fetch_video_view_history(
+        self,
+        video_id: str,
+        platform: str | None = None,
+        limit: int | None = None,
+    ) -> list[dict]:
+        """
+        video_metrics_snapshot 기준으로 단일 영상의 일자별(view_count, like_count, comment_count) 히스토리를 조회한다.
+        - snapshot_date 내림차순으로 정렬
+        """
+        raise NotImplementedError

@@ -119,6 +119,65 @@ async def get_surge_videos(
     return JSONResponse(jsonable_encoder({"items": items}))
 
 
+@trend_router.get("/videos/{video_id}/view_history")
+async def get_video_view_history(
+    video_id: str,
+    platform: str | None = Query(default=None, description="플랫폼 필터 (예: youtube)"),
+    limit: int | None = Query(
+        default=None,
+        ge=1,
+        le=365,
+        description="조회수 히스토리를 조회할 최대 일수 (미지정 시 전체)",
+    ),
+):
+    """
+    특정 영상의 일자별(view_count, like_count, comment_count) 히스토리를 조회한다.
+
+    - 기본: 모든 스냅샷을 snapshot_date 최신순으로 반환
+    - limit 지정 시 최신 N일치만 반환
+
+    응답 예:
+    {
+      "video_id": "...",
+      "platform": "youtube",
+      "history": [
+        { "snapshot_date": "2025-01-10", "view_count": 12345, "like_count": 123, "comment_count": 10 },
+        { "snapshot_date": "2025-01-09", "view_count": 10000, "like_count": 90, "comment_count": 8 },
+        ...
+      ]
+    }
+    """
+    items = usecase.get_video_view_history(
+        video_id=video_id,
+        platform=platform,
+        limit=limit,
+    )
+    if not items:
+        raise HTTPException(status_code=404, detail="해당 영상의 조회 이력이 없습니다.")
+
+    # video_id / platform은 모두 동일하므로 첫 번째 값 기준으로 응답 구성
+    first = items[0]
+    history = [
+        {
+            "snapshot_date": row["snapshot_date"],
+            "view_count": row["view_count"],
+            "like_count": row.get("like_count"),
+            "comment_count": row.get("comment_count"),
+        }
+        for row in items
+    ]
+
+    return JSONResponse(
+        jsonable_encoder(
+            {
+                "video_id": first["video_id"],
+                "platform": first.get("platform"),
+                "history": history,
+            }
+        )
+    )
+
+
 @trend_router.get("/featured")
 async def get_featured_trends(
     popular_limit: int = Query(default=5, ge=1, le=20),

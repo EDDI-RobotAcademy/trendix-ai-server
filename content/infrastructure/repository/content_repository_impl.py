@@ -290,6 +290,10 @@ class ContentRepositoryImpl(ContentRepositoryPort):
         """
         카테고리 기준 상위 콘텐츠를 점수/조회수 기반으로 조회한다.
         """
+        try:
+            self.db.rollback()
+        except Exception:
+            pass
         rows = self.db.execute(
             text(
                 """
@@ -333,6 +337,10 @@ class ContentRepositoryImpl(ContentRepositoryPort):
         - category_id: YouTube Data API의 숫자 categoryId (예: 10=Music, 20=Gaming)
         - days: 최근 N일 내 게시된 영상만 대상 (None이면 전체)
         """
+        try:
+            self.db.rollback()
+        except Exception:
+            pass
         since_date = None
         until_date = None
         if days is not None:
@@ -388,10 +396,55 @@ class ContentRepositoryImpl(ContentRepositoryPort):
         ).mappings()
         return [dict(row) for row in rows]
 
+    def fetch_video_view_history(
+        self,
+        video_id: str,
+        platform: str | None = None,
+        limit: int | None = None,
+    ) -> list[dict]:
+        """
+        video_metrics_snapshot 기준으로 단일 영상의 히스토리를 조회한다.
+        - snapshot_date 내림차순 정렬
+        """
+        try:
+            self.db.rollback()
+        except Exception:
+            pass
+
+        sql = """
+            SELECT
+                video_id,
+                platform,
+                snapshot_date,
+                view_count,
+                like_count,
+                comment_count
+            FROM video_metrics_snapshot
+            WHERE video_id = :video_id
+              AND (:platform IS NULL OR platform = :platform)
+            ORDER BY snapshot_date DESC
+        """
+        if limit is not None:
+            sql += " LIMIT :limit"
+
+        params: dict[str, Any] = {
+            "video_id": video_id,
+            "platform": platform,
+        }
+        if limit is not None:
+            params["limit"] = limit
+
+        rows = self.db.execute(text(sql), params).mappings()
+        return [dict(r) for r in rows]
+
     def fetch_videos_by_keyword(self, keyword: str, limit: int = 20) -> list[dict]:
         """
         키워드 기준 상위 콘텐츠를 점수/조회수 기반으로 조회한다.
         """
+        try:
+            self.db.rollback()
+        except Exception:
+            pass
         rows = self.db.execute(
             text(
                 """
@@ -431,6 +484,10 @@ class ContentRepositoryImpl(ContentRepositoryPort):
         """
         특정 카테고리 내 콘텐츠에서 많이 등장한 주요 키워드를 빈도순으로 조회한다.
         """
+        try:
+            self.db.rollback()
+        except Exception:
+            pass
         rows = self.db.execute(
             text(
                 """
@@ -453,6 +510,10 @@ class ContentRepositoryImpl(ContentRepositoryPort):
         """
         특정 키워드와 함께 등장한 연관 키워드를 빈도순으로 조회한다.
         """
+        try:
+            self.db.rollback()
+        except Exception:
+            pass
         rows = self.db.execute(
             text(
                 """
@@ -476,6 +537,10 @@ class ContentRepositoryImpl(ContentRepositoryPort):
         """
         콘텐츠 단건 상세(점수/키워드 포함)를 조회한다.
         """
+        try:
+            self.db.rollback()
+        except Exception:
+            pass
         video = self.db.execute(
             text(
                 """
@@ -514,6 +579,10 @@ class ContentRepositoryImpl(ContentRepositoryPort):
         """
         최신 집계 일자의 카테고리별 랭킹을 반환한다.
         """
+        try:
+            self.db.rollback()
+        except Exception:
+            pass
         rows = self.db.execute(
             text(
                 """
@@ -553,6 +622,10 @@ class ContentRepositoryImpl(ContentRepositoryPort):
         절대 인기 상위 리스트 (조회수 중심, 좋아요/스코어 보조).
         채널 규모 편향 보정: 채널 평균 조회수를 나눈 정규화 점수를 함께 반환.
         """
+        try:
+            self.db.rollback()
+        except Exception:
+            pass
         rows = self.db.execute(
             text(
                 """
@@ -618,6 +691,10 @@ class ContentRepositoryImpl(ContentRepositoryPort):
         """
         최근 velocity(조회 증가량/일)를 기반한 급상승 리스트 + 채널 규모 보정 점수 포함.
         """
+        try:
+            self.db.rollback()
+        except Exception:
+            pass
         rows = self.db.execute(
             text(
                 """
@@ -799,6 +876,10 @@ class ContentRepositoryImpl(ContentRepositoryPort):
         - days: 최근 N일 내 업로드/수집된 영상만 대상
         - velocity_days: 이전 스냅샷 기준 일수 (예: 1일 전과 비교)
         """
+        try:
+            self.db.rollback()
+        except Exception:
+            pass
         to_date = datetime.utcnow().date()
         from_date = to_date - timedelta(days=days - 1)
         prev_anchor = to_date - timedelta(days=velocity_days)
@@ -881,8 +962,9 @@ class ContentRepositoryImpl(ContentRepositoryPort):
         
         now = datetime.utcnow()
         result: list[dict] = []
-        
-        for rank, r in enumerate(rows, 1):
+
+        # 1차로 SQL 정렬 기준에 따라 surge_score를 계산해 result 리스트를 만든다.
+        for r in rows:
             view_now = int(r["view_count"] or 0)
             view_prev = int(r["view_count_prev"] or 0)
             delta_views = view_now - view_prev
@@ -968,7 +1050,6 @@ class ContentRepositoryImpl(ContentRepositoryPort):
             )
             
             item["surge_score"] = round(surge_score, 2)
-            item["trending_rank"] = rank  # 백엔드에서 정렬된 순위
             
             # 디버깅/분석용 세부 점수
             item["surge_components"] = {
@@ -977,7 +1058,46 @@ class ContentRepositoryImpl(ContentRepositoryPort):
                 "popularity_factor": round(base_popularity * 0.1, 2),
                 "freshness_factor": round(freshness_factor, 2),
             }
-            
+
             result.append(item)
 
-        return result
+        # surge_score 기준으로 전체 내림차순 정렬 후 rank를 부여한다.
+        result_sorted = sorted(
+            result,
+            key=lambda x: x.get("surge_score") or 0.0,
+            reverse=True,
+        )
+
+        for idx, item in enumerate(result_sorted, 1):
+            item["trending_rank"] = idx
+
+            # video_score.trend_score에 surge_score를 upsert 한다.
+            try:
+                self.db.execute(
+                    text(
+                        """
+                        INSERT INTO video_score (video_id, platform, trend_score, updated_at)
+                        VALUES (:video_id, :platform, :trend_score, :updated_at)
+                        ON CONFLICT (video_id) DO UPDATE SET
+                            trend_score = EXCLUDED.trend_score,
+                            updated_at = EXCLUDED.updated_at
+                        """
+                    ),
+                    {
+                        "video_id": item["video_id"],
+                        "platform": item.get("platform") or "youtube",
+                        "trend_score": item["surge_score"],
+                        "updated_at": now,
+                    },
+                )
+            except Exception:
+                # 점수 저장 실패는 조회 자체를 막지 않기 위해 무시한다.
+                pass
+
+        try:
+            self.db.commit()
+        except Exception:
+            # commit 에러도 조회 응답은 유지하되, 추후 로그/모니터링으로 대응
+            self.db.rollback()
+
+        return result_sorted
