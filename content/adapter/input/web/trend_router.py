@@ -29,24 +29,24 @@ async def get_hot_categories(
     return JSONResponse(jsonable_encoder({"items": result}))
 
 
-@trend_router.get("/categories/{category_id}/recommendations")
+@trend_router.get("/categories/{category}/recommendations")
 async def get_category_recommendations(
-    category_id: int,
+    category: str,
     limit: int = Query(default=20, ge=1, le=100),
     days: int = Query(default=14, ge=1, le=90, description="최근 N일 내 수집본만 대상으로 추천"),
     platform: str | None = Query(default=None, description="플랫폼 필터 (예: youtube)"),
 ):
     """
-    YouTube category_id 기준 추천 콘텐츠(점수/신선도 기반)를 조회한다.
-    - 예: /trends/categories/10/recommendations?limit=20&days=14&platform=youtube
+    카테고리 문자열(category) 기준 추천 콘텐츠(점수/신선도 기반)를 조회한다.
+    - 예: /trends/categories/게임/recommendations?limit=20&days=14&platform=youtube
     """
     items = usecase.get_recommended_contents(
-        category_id=category_id, limit=limit, days=days, platform=platform
+        category=category, limit=limit, days=days, platform=platform
     )
     if not items:
         raise HTTPException(status_code=404, detail="추천 가능한 콘텐츠가 없습니다.")
     # datetime/date 등이 JSON 직렬화 오류를 내지 않도록 변환
-    return JSONResponse(jsonable_encoder({"category_id": category_id, "items": items}))
+    return JSONResponse(jsonable_encoder({"category": category, "items": items}))
 
 
 @trend_router.get("/categories")
@@ -58,6 +58,33 @@ async def list_categories(limit: int = Query(default=100, ge=1, le=500)):
     if not categories:
         raise HTTPException(status_code=404, detail="등록된 카테고리가 없습니다.")
     return JSONResponse(jsonable_encoder({"categories": categories}))
+
+
+@trend_router.get("/menu")
+async def get_videos_by_category_id(
+    category_id: int = Query(..., description="YouTube 카테고리 ID (숫자)"),
+    limit: int = Query(default=20, ge=1, le=100),
+    days: int = Query(default=14, ge=1, le=90, description="최근 N일 내 게시된 영상만 대상"),
+    platform: str | None = Query(default=None, description="플랫폼 필터 (예: youtube)"),
+):
+    """
+    category_id 기준으로 최근 N일 내 영상 리스트를 조회한다.
+
+    - 요청 예시:
+      /trends/menu?category_id=20&limit=20&days=14&platform=youtube
+
+    - 응답:
+      { "category_id": 20, "items": [ { video_id, title, ... }, ... ] }
+    """
+    items = usecase.get_videos_by_category_id(
+        category_id=category_id,
+        limit=limit,
+        days=days,
+        platform=platform,
+    )
+    if not items:
+        raise HTTPException(status_code=404, detail="해당 카테고리의 영상이 없습니다.")
+    return JSONResponse(jsonable_encoder({"category_id": category_id, "items": items}))
 
 
 @trend_router.get("/videos/surge")

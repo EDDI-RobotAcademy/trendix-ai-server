@@ -101,10 +101,10 @@ class ContentRepositoryPort(ABC):
 
     @abstractmethod
     def fetch_recommended_videos_by_category(
-        self, category_id: int, limit: int = 20, days: int = 14, platform: str | None = None
+        self, category: str, limit: int = 20, days: int = 14, platform: str | None = None
     ) -> list[dict]:
         """
-        YouTube category_id 기준으로 최근 N일 내 추천 영상을 조회한다.
+        카테고리 문자열(category) 기준으로 최근 N일 내 추천 영상을 조회한다.
         """
         raise NotImplementedError
 
@@ -143,8 +143,10 @@ class ContentRepositoryPort(ABC):
         category_id: int,
         limit: int = 10,
         platform: str | None = None,
+        days: int | None = None,
     ) -> list[dict]:
         """
         YouTube category_id 기준으로 상위 영상 리스트를 조회한다.
+        - days: 최근 N일 내 게시된 영상만 대상 (None이면 전체)
         """
         raise NotImplementedError

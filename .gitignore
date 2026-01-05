@@ -431,3 +431,4 @@ downloaded_docs/
 .env.*
 !.env.example
 .apple/
+.md
