@@ -129,6 +129,15 @@ class ContentRepositoryPort(ABC):
         raise NotImplementedError
 
     @abstractmethod
+    def fetch_video_snapshot_history(
+        self, video_id: str, platform: str = "youtube", days: int = 7
+    ) -> list[dict]:
+        """
+        특정 영상의 스냅샷 히스토리를 조회하여 추이 차트 데이터를 제공한다.
+        """
+        raise NotImplementedError
+
+    @abstractmethod
     def fetch_videos_by_category_id(
         self,
         category_id: int,

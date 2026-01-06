@@ -201,3 +201,28 @@ async def get_featured_trends(
         raise HTTPException(status_code=404, detail="추천할 데이터가 없습니다.")
     return JSONResponse(jsonable_encoder(result))
 
+
+@trend_router.get("/videos/{video_id}/history")
+async def get_video_snapshot_history(
+    video_id: str,
+    days: int = Query(default=7, ge=1, le=30, description="최근 N일간의 스냅샷 히스토리"),
+    platform: str = Query(default="youtube", description="플랫폼 (기본: youtube)"),
+):
+    """
+    특정 영상의 스냅샷 히스토리를 조회하여 추이 차트 데이터를 제공한다.
+    스냅샷이 없는 경우 현재 video 데이터를 반환한다.
+
+    - 요청 예시:
+      /trends/videos/abc123/history?days=7&platform=youtube
+
+    - 응답:
+      { "items": [ { snapshot_date, view_count, like_count, comment_count, daily_*_increase }, ... ] }
+    """
+    items = usecase.get_video_snapshot_history(
+        video_id=video_id,
+        platform=platform,
+        days=days,
+    )
+    # 빈 배열도 허용 (프론트엔드에서 처리)
+    return JSONResponse(jsonable_encoder({"video_id": video_id, "items": items}))
+

@@ -72,3 +72,13 @@ class TrendQueryUseCase:
             platform=platform,
             limit=limit,
         )
+
+    def get_video_snapshot_history(
+            self, video_id: str, platform: str = "youtube", days: int = 7
+    ) -> list[dict]:
+        """
+        특정 영상의 스냅샷 히스토리를 조회하여 추이 차트 데이터를 제공한다.
+        """
+        return self.repository.fetch_video_snapshot_history(
+            video_id=video_id, platform=platform, days=days
+        )
