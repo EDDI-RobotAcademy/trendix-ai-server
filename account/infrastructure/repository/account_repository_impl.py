@@ -6,7 +6,8 @@ from sqlalchemy.orm import Session
 from account.application.port.account_repository_port import AccountRepositoryPort
 from account.domain.account import Account
 from account.domain.interest import AccountInterest
-from account.infrastructure.orm.account_orm import AccountORM, AccountInterestORM
+from account.domain.dashboard_layout import DashboardLayout
+from account.infrastructure.orm.account_orm import AccountORM, AccountInterestORM, AccountDashboardLayoutORM
 from config.database.session import get_db_session
 
 
@@ -117,6 +118,48 @@ class AccountRepositoryImpl(AccountRepositoryPort):
         )
         return [self._interest_to_domain(i) for i in interests]
 
+    def save_dashboard_layout(self, layout: DashboardLayout) -> DashboardLayout:
+        """대시보드 레이아웃 저장 (없으면 생성, 있으면 업데이트)"""
+        self._ensure_session()
+
+        # 기존 레이아웃 조회
+        existing = (
+            self.db.query(AccountDashboardLayoutORM)
+            .filter(AccountDashboardLayoutORM.account_id == layout.account_id)
+            .one_or_none()
+        )
+
+        if existing:
+            # 업데이트
+            existing.widgets = layout.widgets
+            existing.layouts = layout.layouts
+            self.db.commit()
+            self.db.refresh(existing)
+            return self._dashboard_layout_to_domain(existing)
+        else:
+            # 생성
+            orm = AccountDashboardLayoutORM(
+                account_id=layout.account_id,
+                widgets=layout.widgets,
+                layouts=layout.layouts,
+            )
+            self.db.add(orm)
+            self.db.commit()
+            self.db.refresh(orm)
+            return self._dashboard_layout_to_domain(orm)
+
+    def get_dashboard_layout(self, account_id: int) -> Optional[DashboardLayout]:
+        """대시보드 레이아웃 조회"""
+        self._ensure_session()
+        orm = (
+            self.db.query(AccountDashboardLayoutORM)
+            .filter(AccountDashboardLayoutORM.account_id == account_id)
+            .one_or_none()
+        )
+        if orm is None:
+            return None
+        return self._dashboard_layout_to_domain(orm)
+
     @staticmethod
     def _to_domain(orm_account: AccountORM) -> Account:
         account = Account(
@@ -136,3 +179,15 @@ class AccountRepositoryImpl(AccountRepositoryPort):
         interest.id = orm.id
         interest.created_at = orm.created_at
         return interest
+
+    @staticmethod
+    def _dashboard_layout_to_domain(orm: AccountDashboardLayoutORM) -> DashboardLayout:
+        layout = DashboardLayout(
+            account_id=orm.account_id,
+            widgets=orm.widgets,
+            layouts=orm.layouts,
+        )
+        layout.id = orm.id
+        layout.created_at = orm.created_at
+        layout.updated_at = orm.updated_at
+        return layout

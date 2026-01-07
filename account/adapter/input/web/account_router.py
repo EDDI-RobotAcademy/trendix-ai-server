@@ -22,6 +22,12 @@ class InterestRequest(BaseModel):
     interest: str = Field(min_length=1, max_length=100)
 
 
+class DashboardLayoutRequest(BaseModel):
+    """대시보드 레이아웃 저장 요청"""
+    widgets: list | dict  # JSON 데이터
+    layouts: dict  # JSON 데이터
+
+
 def _account_to_dict(account):
     return {
         "id": account.id,
@@ -130,3 +136,37 @@ def delete_interest(account_id: int, interest_id: int):
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
     return {"deleted": True}
+
+
+@account_router.get("/{account_id}/dashboard-layout")
+def get_dashboard_layout(account_id: int):
+    """대시보드 레이아웃 조회"""
+    try:
+        layout = usecase.get_dashboard_layout(account_id)
+        if layout is None:
+            # 레이아웃이 없으면 기본값 반환
+            return {"widgets": [], "layouts": {}}
+        return {
+            "widgets": layout.widgets,
+            "layouts": layout.layouts,
+        }
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+
+
+@account_router.put("/{account_id}/dashboard-layout")
+def save_dashboard_layout(account_id: int, request: DashboardLayoutRequest):
+    """대시보드 레이아웃 저장 (생성 또는 업데이트)"""
+    try:
+        layout = usecase.save_dashboard_layout(
+            account_id=account_id,
+            widgets=request.widgets,
+            layouts=request.layouts,
+        )
+        return {
+            "widgets": layout.widgets,
+            "layouts": layout.layouts,
+            "updated_at": layout.updated_at,
+        }
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))

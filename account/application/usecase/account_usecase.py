@@ -1,8 +1,9 @@
-from typing import List, Optional
+from typing import List, Optional, Any
 
 from account.application.port.account_repository_port import AccountRepositoryPort
 from account.domain.account import Account
 from account.domain.interest import AccountInterest
+from account.domain.dashboard_layout import DashboardLayout
 
 
 class AccountUseCase:
@@ -61,3 +62,16 @@ class AccountUseCase:
         if self.repo.find_by_id(account_id) is None:
             raise ValueError("Account not found")
         self.repo.delete_interest(account_id, interest_id)
+
+    def save_dashboard_layout(self, account_id: int, widgets: Any, layouts: Any) -> DashboardLayout:
+        """대시보드 레이아웃 저장"""
+        if self.repo.find_by_id(account_id) is None:
+            raise ValueError("Account not found")
+        layout = DashboardLayout(account_id=account_id, widgets=widgets, layouts=layouts)
+        return self.repo.save_dashboard_layout(layout)
+
+    def get_dashboard_layout(self, account_id: int) -> Optional[DashboardLayout]:
+        """대시보드 레이아웃 조회"""
+        if self.repo.find_by_id(account_id) is None:
+            raise ValueError("Account not found")
+        return self.repo.get_dashboard_layout(account_id)
