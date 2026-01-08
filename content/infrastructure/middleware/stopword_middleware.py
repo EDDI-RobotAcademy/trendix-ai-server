@@ -28,7 +28,7 @@ class StopwordMiddleware(BaseHTTPMiddleware):
                         # Request를 새로 만들어 body 수정
                         body = body_bytes.decode("utf-8")
                         json_body = json.loads(body)
-                        cleaned_body = self._usecase.remove_stopwords_iterative(json_body)
+                        cleaned_body = usecase.remove_stopwords_iterative(json_body)
                         request.state.cleaned_body = cleaned_body
 
                     except (json.JSONDecodeError, UnicodeDecodeError) as e:
@@ -52,7 +52,7 @@ class StopwordMiddleware(BaseHTTPMiddleware):
                     for key, value in form.multi_items():
                         # 파일은 그대로 두고, 문자열만 불용어 제거
                         if isinstance(value, str):
-                            new_form[key] = self._usecase.remove_stopwords(value)
+                            new_form[key] = usecase.remove_stopwords(value)
                         else:
                             new_form[key] = value
                     
