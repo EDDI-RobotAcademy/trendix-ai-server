@@ -56,6 +56,7 @@ class VideoORM(Base):
     comment_count = Column(BigInteger)
     thumbnail_url = Column(String(500))
     crawled_at = Column(DateTime, default=datetime.utcnow)
+    is_shorts = Column(Boolean, default=False)
 
 
 class VideoCommentORM(Base):

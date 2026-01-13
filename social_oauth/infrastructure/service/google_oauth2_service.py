@@ -13,7 +13,7 @@ class GoogleOAuth2Service:
 
     def get_authorization_url(self) -> str:
         client_id = os.getenv("GOOGLE_CLIENT_ID")
-        redirect_uri = quote(os.getenv("GOOGLE_REDIRECT_URI"), safe='')
+        redirect_uri = os.getenv("GOOGLE_REDIRECT_URI")  # quote() 제거: 토큰 요청과 일치시킴
         scope = "openid email profile"
         return (
             f"{GOOGLE_AUTH_URL}"
@@ -31,7 +31,20 @@ class GoogleOAuth2Service:
             "redirect_uri": os.getenv("GOOGLE_REDIRECT_URI"),
             "grant_type": "authorization_code"
         }
+        
+        # 디버깅: 토큰 요청 정보 출력
+        print(f"[DEBUG] Token Request to {GOOGLE_TOKEN_URL}")
+        print(f"[DEBUG] redirect_uri: {data['redirect_uri']}")
+        print(f"[DEBUG] client_id: {data['client_id']}")
+        print(f"[DEBUG] code: {data['code'][:30]}..." if len(data['code']) > 30 else f"[DEBUG] code: {data['code']}")
+        
         resp = requests.post(GOOGLE_TOKEN_URL, data=data)
+        
+        # 에러 시 상세 정보 출력
+        if not resp.ok:
+            print(f"[ERROR] Google Token API returned {resp.status_code}")
+            print(f"[ERROR] Response: {resp.text}")
+        
         resp.raise_for_status()
         token_data = resp.json()
         # Pydantic 모델에 맞춰서 변환

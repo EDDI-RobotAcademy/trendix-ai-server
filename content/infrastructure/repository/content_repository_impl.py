@@ -98,11 +98,15 @@ class ContentRepositoryImpl(ContentRepositoryPort):
             orm.published_at = video.published_at
             orm.duration = video.duration
             orm.thumbnail_url = video.thumbnail_url
+            orm.is_shorts = video.is_shorts if video.is_shorts is not None else False
         # 한국어 주석: 기존 레코드는 변동성 필드(조회/좋아요/댓글 수, 최신 수집시각)만 갱신합니다.
         orm.view_count = video.view_count
         orm.like_count = video.like_count
         orm.comment_count = video.comment_count
         orm.crawled_at = video.crawled_at
+        # is_shorts도 업데이트 (재분류 가능)
+        if video.is_shorts is not None:
+            orm.is_shorts = video.is_shorts
 
         self.db.commit()
         return video
@@ -663,6 +667,44 @@ class ContentRepositoryImpl(ContentRepositoryPort):
 
         return {"video": dict(video), "keywords": [dict(k) for k in keywords]}
 
+    def fetch_video_summary(self, video_id: str, platform: str | None = None) -> dict | None:
+        """
+        비교 분석용 요약 정보를 조회한다.
+        """
+        try:
+            self.db.rollback()
+        except Exception:
+            pass
+
+        # 한국어 주석: 쇼츠 비교에 필요한 핵심 컬럼만 조회하여 오버헤드를 줄인다.
+        row = self.db.execute(
+            text(
+                """
+                SELECT
+                    v.video_id,
+                    v.title,
+                    v.channel_id,
+                    v.platform,
+                    v.view_count,
+                    v.like_count,
+                    v.comment_count,
+                    v.published_at,
+                    v.thumbnail_url,
+                    v.duration,
+                    COALESCE(ch.title, v.channel_id) AS channel_name
+                FROM video v
+                LEFT JOIN channel ch ON ch.channel_id = v.channel_id
+                WHERE v.video_id = :video_id
+                  AND (:platform IS NULL OR v.platform = :platform)
+                """
+            ),
+            {"video_id": video_id, "platform": platform},
+        ).mappings().first()
+
+        if not row:
+            return None
+        return dict(row)
+
     def fetch_hot_category_trends(self, platform: str | None = None, limit: int = 20) -> list[dict]:
         """
         최신 집계 일자의 카테고리별 랭킹을 반환한다.
@@ -910,7 +952,6 @@ class ContentRepositoryImpl(ContentRepositoryPort):
                 LEFT JOIN video_score sc ON sc.video_id = v.video_id
                 LEFT JOIN creator_account ca ON ca.account_id = v.channel_id AND ca.platform = v.platform
                 LEFT JOIN channel ch ON ch.channel_id = v.channel_id
-                WHERE vs.category = :category
                 LEFT JOIN LATERAL (
                     SELECT view_count, like_count, comment_count
                     FROM video_metrics_snapshot vms
@@ -920,7 +961,7 @@ class ContentRepositoryImpl(ContentRepositoryPort):
                     ORDER BY vms.snapshot_date DESC
                     LIMIT 1
                 ) prev_snap ON true
-                WHERE v.category_id = :category_id
+                WHERE vs.category = :category
                   AND v.published_at::date BETWEEN :since_date AND :until_date
                   AND (:platform IS NULL OR v.platform = :platform)
                 ORDER BY COALESCE(sc.total_score, sc.sentiment_score, sc.trend_score, v.view_count) DESC NULLS LAST,
