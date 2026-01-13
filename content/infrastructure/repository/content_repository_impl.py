@@ -667,6 +667,44 @@ class ContentRepositoryImpl(ContentRepositoryPort):
 
         return {"video": dict(video), "keywords": [dict(k) for k in keywords]}
 
+    def fetch_video_summary(self, video_id: str, platform: str | None = None) -> dict | None:
+        """
+        비교 분석용 요약 정보를 조회한다.
+        """
+        try:
+            self.db.rollback()
+        except Exception:
+            pass
+
+        # 한국어 주석: 쇼츠 비교에 필요한 핵심 컬럼만 조회하여 오버헤드를 줄인다.
+        row = self.db.execute(
+            text(
+                """
+                SELECT
+                    v.video_id,
+                    v.title,
+                    v.channel_id,
+                    v.platform,
+                    v.view_count,
+                    v.like_count,
+                    v.comment_count,
+                    v.published_at,
+                    v.thumbnail_url,
+                    v.duration,
+                    COALESCE(ch.title, v.channel_id) AS channel_name
+                FROM video v
+                LEFT JOIN channel ch ON ch.channel_id = v.channel_id
+                WHERE v.video_id = :video_id
+                  AND (:platform IS NULL OR v.platform = :platform)
+                """
+            ),
+            {"video_id": video_id, "platform": platform},
+        ).mappings().first()
+
+        if not row:
+            return None
+        return dict(row)
+
     def fetch_hot_category_trends(self, platform: str | None = None, limit: int = 20) -> list[dict]:
         """
         최신 집계 일자의 카테고리별 랭킹을 반환한다.

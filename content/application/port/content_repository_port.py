@@ -86,6 +86,13 @@ class ContentRepositoryPort(ABC):
         raise NotImplementedError
 
     @abstractmethod
+    def fetch_video_summary(self, video_id: str, platform: str | None = None) -> dict | None:
+        """
+        비교 분석에 필요한 최소 영상 메타/지표를 조회한다.
+        """
+        raise NotImplementedError
+
+    @abstractmethod
     def fetch_hot_category_trends(self, platform: str | None = None, limit: int = 20) -> list[dict]:
         raise NotImplementedError
 

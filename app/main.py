@@ -12,6 +12,7 @@ from content.adapter.input.web.topic_router import topic_router
 from content.adapter.input.web.chat_router import chat_router
 from content.adapter.input.web.trend_router import trend_router
 from content.adapter.input.web.filter_router import filter_router
+from content.adapter.input.web.compare_router import compare_router
 from social_oauth.adapter.input.web.google_oauth2_router import authentication_router
 from app.batch.trend_batch import start_trend_scheduler
 from app.batch.trending_videos_batch import start_trending_videos_scheduler
@@ -77,6 +78,7 @@ app.include_router(trend_router, prefix="/trends")
 app.include_router(chat_router)
 app.include_router(logout_router, prefix="/logout")
 app.include_router(filter_router, prefix="/filter")
+app.include_router(compare_router, prefix="/analysis")
 
 @app.get("/health")
 def health_check() -> dict[str, str]:
@@ -100,5 +102,5 @@ if __name__ == "__main__":
     import uvicorn
 
     host = os.getenv("APP_HOST", "0.0.0.0")
-    port = int(os.getenv("APP_PORT", "8000"))
+    port = int(os.getenv("APP_PORT", "33333"))
     uvicorn.run(app, host=host, port=port)
