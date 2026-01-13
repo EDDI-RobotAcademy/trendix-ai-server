@@ -2,12 +2,13 @@ import asyncio
 import json
 from typing import Literal
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Request, Depends
 from fastapi.responses import StreamingResponse
 from openai import OpenAI
 from pydantic import BaseModel, Field
 
 from config.settings import OpenAISettings
+from content.infrastructure.config.dependency_injection import Container
 from content.application.usecase.stopword_usecase import StopwordUseCase
 from content.application.usecase.trend_chat_usecase import TrendChatUseCase
 from content.application.usecase.trend_featured_usecase import TrendFeaturedUseCase
@@ -21,6 +22,7 @@ MODEL_NAME = "gpt-4o"
 class ChatMessage(BaseModel):
     role: str = Field(pattern="^(user|assistant|system)$")
     content: str = Field(min_length=1)
+    videos: list[dict] | None = None
 
 
 class ChatRequest(BaseModel):
@@ -31,6 +33,10 @@ class ChatRequest(BaseModel):
     rising_limit: int = 5
     velocity_days: int = 1
     platform: str | None = None
+    videoId: str | None = Field(default=None, alias="video_id")
+
+    class Config:
+        populate_by_name = True
 
 
 chat_router = APIRouter(tags=["chat"])
@@ -42,9 +48,10 @@ embedding_service = EmbeddingService(OpenAISettings())
 trend_chat_usecase: TrendChatUseCase | None = None
 _prototype_embeds: dict[str, list[float]] = {}
 
-# 임베딩 기반 의도 프로토타입 설명 (추천 흐름만 사용)
+# 임베딩 기반 의도 프로토타입 설명
 INTENT_PROTOTYPES = {
-    "trend": "사용자가 추천, 트렌드, 인기 영상, 요즘 뜨는 콘텐츠를 묻는 질문",
+    "trend": "추천, 요즘 뜨는 트렌드, 인기 있는 유튜버나 영상, 시장 상황을 묻는 질문 (예: 요즘 어떤 영상이 인기야?, 먹방이 대세야?, 재밌는 영상 추천해줘, 볼만한 숏츠 있어?)",
+    "guide": "특정 분야나 영상의 제작 방법, 촬영 기술, 편집 노하우, 구성 방식 등 구체적인 가이드를 요청하는 질문 (예: 먹방 어떻게 찍어?, 인트로는 몇 분이 좋아?, 촬영 각도는 어떻게 해?, 저 영상은 어떻게 만들었어?)",
 }
 
 
@@ -55,10 +62,9 @@ def _extract_last_user_message(messages: list[ChatMessage]) -> str:
     return ""
 
 
-def _classify_intent(messages: list[ChatMessage]) -> Literal["trend"]:
+def _classify_intent(messages: list[ChatMessage]) -> Literal["trend", "guide", "general"]:
     """
-    요청 메시지를 임베딩으로 분류해 트렌드 추천 흐름으로만 라우팅한다.
-    임베딩이 불가한 경우에도 기본적으로 트렌드 흐름을 사용한다.
+    요청 메시지를 임베딩으로 분류해 트렌드 추천, 가이드, 또는 일반 대화로 라우팅한다.
     """
     text = _extract_last_user_message(messages)
     cleaned = stopword_usecase.preprocess(text)
@@ -66,12 +72,12 @@ def _classify_intent(messages: list[ChatMessage]) -> Literal["trend"]:
     intent_by_embed = _classify_intent_by_embedding(cleaned)
     if intent_by_embed:
         return intent_by_embed
-    return "trend"
+    return "general"
 
 
-def _classify_intent_by_embedding(text: str) -> Literal["trend"] | None:
+def _classify_intent_by_embedding(text: str) -> Literal["trend", "guide"] | None:
     """
-    임베딩을 활용한 트렌드 의도 분류.
+    임베딩을 활용한 의도 분류.
     - 임베딩 클라이언트가 없거나 입력이 비어 있으면 None 반환
     - 가장 유사한 프로토타입을 선택하며, 점수 차이가 근소하면 None으로 폴백
     """
@@ -100,8 +106,32 @@ def _classify_intent_by_embedding(text: str) -> Literal["trend"] | None:
         return None
 
     best_label, best_score = scored[0]
-    if len(scored) > 1 and (best_score - scored[1][1]) < 0.05:
-        # 분류 확신이 낮으면 폴백
+    
+    # "제작", "방법", "어떻게", "촬영", "편집" 등의 키워드가 있으면 guide 점수에 가산점 부여 (단순 임베딩 한계 보완)
+    keywords = ["제작", "방법", "어떻게", "촬영", "편집", "각도", "분량", "인트로"]
+    if any(kw in text for kw in keywords):
+        # guide가 1순위가 아니더라도 점수를 높여줌
+        for i, (label, score) in enumerate(scored):
+            if label == "guide":
+                scored[i] = (label, score + 0.1)
+        scored.sort(key=lambda x: x[1], reverse=True)
+        best_label, best_score = scored[0]
+
+    # "추천", "영상", "콘텐츠", "재밌는거" 등이 있으면 trend 점수에 가산점 부여
+    trend_keywords = ["추천", "영상", "콘텐츠", "재밌는", "인기", "볼만한", "뭐 볼까", "쇼츠", "유튜버"]
+    if any(kw in text for kw in trend_keywords):
+        for i, (label, score) in enumerate(scored):
+            if label == "trend":
+                scored[i] = (label, score + 0.15)
+        scored.sort(key=lambda x: x[1], reverse=True)
+        best_label, best_score = scored[0]
+
+    # 임계값 및 차이 검증
+    if best_score < 0.25:
+        return None
+        
+    if len(scored) > 1 and (best_score - scored[1][1]) < 0.03:
+        # 분류 확신이 아주 낮으면 폴백
         return None
     return best_label
 
@@ -113,8 +143,17 @@ def _get_trend_chat_usecase(settings: OpenAISettings) -> TrendChatUseCase:
     return trend_chat_usecase
 
 
+def get_container() -> Container:
+    from content.infrastructure.config.dependency_injection import create_container
+    return create_container()
+
+
 @chat_router.post("/chat/stream")
-async def chat_stream(request_body: ChatRequest, request: Request):
+async def chat_stream(
+    request_body: ChatRequest, 
+    request: Request,
+    container: Container = Depends(get_container)
+):
     """
     text/event-stream(SSE) 형태로 토큰을 순차 전송합니다.
     질문 의도를 판별해 트렌드 추천/일반 가이드 흐름으로 분기합니다.
@@ -122,9 +161,14 @@ async def chat_stream(request_body: ChatRequest, request: Request):
     settings = OpenAISettings()
     if not settings.api_key:
         raise HTTPException(status_code=500, detail="OPENAI_API_KEY is not configured")
-
     intent = _classify_intent(request_body.messages)
-    user_messages = [{"role": m.role, "content": m.content} for m in request_body.messages]
+    print("intent  " + intent)
+    user_messages = []
+    for m in request_body.messages:
+        msg = {"role": m.role, "content": m.content}
+        if m.videos:
+            msg["videos"] = m.videos
+        user_messages.append(msg)
 
     # 일반 챗 모델 이름 기본값
     model = request_body.model or settings.model or MODEL_NAME
@@ -146,10 +190,12 @@ async def chat_stream(request_body: ChatRequest, request: Request):
                     platform=request_body.platform,
                 )
                 yield f"data: {json.dumps({'videos' : relevant}, ensure_ascii=False)}\n\n"
-                # data = f"data: {json.dumps({'content': reply, 'relevant': relevant}, ensure_ascii=False)}\n\n"
-                # yield data
-                # yield "data: [DONE]\n\n"
-                # return
+            elif intent == "guide":
+                usecase = container.guide_chat_usecase()
+                stream = await usecase.answer_with_guide(
+                    user_messages=user_messages,
+                    video_id=request_body.videoId
+                )
             else:
                 client = OpenAI(api_key=settings.api_key)
                 stream = client.chat.completions.create(

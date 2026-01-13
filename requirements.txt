@@ -11,3 +11,14 @@ redis
 requests
 boto3
 python-multipart
+opencv-python
+ultralytics
+openai-whisper
+pgvector
+sentence-transformers
+celery
+dependency_injector
+aiohttp
+aiofiles
+yt_dlp
+asyncpg
