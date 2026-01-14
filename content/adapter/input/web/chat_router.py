@@ -43,7 +43,7 @@ chat_router = APIRouter(tags=["chat"])
 
 repository = ContentRepositoryImpl()
 featured_usecase = TrendFeaturedUseCase(repository)
-stopword_usecase = StopwordUseCase(StopwordRepositoryImpl.getInstance(), lang="ko")
+stopword_usecase = StopwordUseCase(StopwordRepositoryImpl(), lang="ko")
 embedding_service = EmbeddingService(OpenAISettings())
 trend_chat_usecase: TrendChatUseCase | None = None
 _prototype_embeds: dict[str, list[float]] = {}
@@ -143,6 +143,13 @@ def _get_trend_chat_usecase(settings: OpenAISettings) -> TrendChatUseCase:
     return trend_chat_usecase
 
 
+def _create_error_stream(detail: str):
+    """에러 메시지를 SSE 스트림 형식으로 생성"""
+    async def generator():
+        data = f"data: {json.dumps({'content': detail}, ensure_ascii=False)}\n\n"
+        yield data
+    return generator()
+  
 def get_container() -> Container:
     from content.infrastructure.config.dependency_injection import create_container
     return create_container()
@@ -161,6 +168,28 @@ async def chat_stream(
     settings = OpenAISettings()
     if not settings.api_key:
         raise HTTPException(status_code=500, detail="OPENAI_API_KEY is not configured")
+
+     # messages 유효성 검사 추가
+    if not request_body.messages or len(request_body.messages) == 0:
+        raise HTTPException(status_code=400, detail="messages 배열이 비어있습니다.")
+    #print(f"request_body.messages:",request_body.messages)
+    
+    # content가 null/None 또는 공백/* 인 메시지만 필터링하여 제거
+    valid_messages = []
+    for msg in request_body.messages:
+        content = msg.content or ""
+        stripped_content = content.strip()
+        
+        # content가 null이거나 공백/* 이면 스킵
+        if stripped_content and stripped_content != '**':
+            valid_messages.append(msg)
+    
+    if len(valid_messages) == 0:
+        return StreamingResponse(
+            _create_error_stream("유효한 메시지가 없습니다. content가 공백이나 '*' 인 메시지는 제거됩니다."),
+            media_type="text/event-stream"
+        )
+    
     intent = _classify_intent(request_body.messages)
     print("intent  " + intent)
     user_messages = []
@@ -230,3 +259,4 @@ async def chat_stream(
             "Connection": "keep-alive",
         }
     )
+
