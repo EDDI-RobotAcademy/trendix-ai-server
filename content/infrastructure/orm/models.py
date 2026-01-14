@@ -1,5 +1,9 @@
 from datetime import datetime, date
-from sqlalchemy import Column, String, Text, BigInteger, Integer, DateTime, Date, DECIMAL, Boolean, PrimaryKeyConstraint, UniqueConstraint, text
+
+from pgvector.sqlalchemy import VECTOR
+from sqlalchemy import Column, String, Text, BigInteger, Integer, DateTime, Date, DECIMAL, Boolean, \
+    PrimaryKeyConstraint, UniqueConstraint, text, ForeignKey, TIMESTAMP
+from sqlalchemy.dialects.postgresql import JSONB
 
 from config.database.session import Base
 
@@ -193,3 +197,31 @@ class StopwordORM(Base):
     word = Column(Text, nullable=False)
     enabled = Column(Boolean, nullable=False, default=True)
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+
+
+class VideoAnalysisORM(Base):
+    __tablename__ = 'video_analysis'
+
+    id = Column(Integer, primary_key=True)
+    video_id = Column(String(100), ForeignKey('video.video_id'))
+    transcript = Column(Text)
+    transcript_timestamps = Column(JSONB)
+    subtitle_text = Column(Text)
+    key_topics = Column(JSONB)
+    visual_objects = Column(JSONB)
+    scene_changes = Column(JSONB)
+    dominant_colors = Column(JSONB)
+    analysis_completed_at = Column(TIMESTAMP)
+    created_at = Column(TIMESTAMP, default=datetime.now)
+
+
+class VideoEmbeddingORM(Base):
+    __tablename__ = 'video_embeddings'
+
+    id = Column(Integer, primary_key=True)
+    video_id = Column(String(100), ForeignKey('video.video_id'))
+    chunk_type = Column(String(50))  # 'transcript', 'visual', 'subtitle'
+    chunk_text = Column(Text)
+    chunk_metadata = Column(JSONB)
+    embedding = Column(VECTOR)  # pgvector 타입
+    created_at = Column(TIMESTAMP, default=datetime.now)

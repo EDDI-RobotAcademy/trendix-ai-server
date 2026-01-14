@@ -43,3 +43,5 @@ required variables.
 - ì½˜í…ì¸  ë¹„êµ ë¶„ì„ API: `POST /analysis/shorts/compare` (íŒŒì¼: `content/adapter/input/web/compare_router.py`)
 - ì˜ìƒ ìš”ì•½ ì¡°íšŒ: `ContentRepositoryImpl.fetch_video_summary` (íŒŒì¼: `content/infrastructure/repository/content_repository_impl.py`)
 - Shorts ºñ±³ ºĞ¼® API´Â pp/main.py¿¡ compare_router¸¦ /analysis prefix·Î µî·ÏÇØ¾ß ÇÁ·ĞÆ®¿¡¼­ È£Ãâ °¡´ÉÇÕ´Ï´Ù.
+- Ã¤³Î ºĞ¼® API: POST /analysis/channel (ÆÄÀÏ: content/adapter/input/web/channel_analysis_router.py)
+- ¿µ»ó »ó¼¼ API: GET /analysis/videos/{video_id} (ÆÄÀÏ: content/adapter/input/web/video_detail_router.py)
