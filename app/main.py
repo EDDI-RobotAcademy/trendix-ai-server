@@ -21,6 +21,8 @@ from app.batch.youtube_tag_batch import start_youtube_tag_scheduler
 from config.database.session import init_db_schema
 from social_oauth.adapter.input.web.logout_router import logout_router
 from content.adapter.input.web.video_router import video_router
+from content.adapter.input.web.channel_analysis_router import channel_analysis_router
+from content.adapter.input.web.video_detail_router import video_detail_router
 
 from content.infrastructure.middleware.stopword_middleware import StopwordMiddleware
 
@@ -89,6 +91,8 @@ app.include_router(logout_router, prefix="/logout")
 app.include_router(filter_router, prefix="/filter")
 app.include_router(compare_router, prefix="/analysis")
 app.include_router(video_router, prefix="/video")
+app.include_router(channel_analysis_router, prefix="/analysis")
+app.include_router(video_detail_router, prefix="/analysis")
 
 @app.get("/health")
 def health_check() -> dict[str, str]:
@@ -112,5 +116,5 @@ if __name__ == "__main__":
     import uvicorn
 
     host = os.getenv("APP_HOST", "0.0.0.0")
-    port = int(os.getenv("APP_PORT", "8000"))
+    port = int(os.getenv("APP_PORT", "33333"))
     uvicorn.run(app, host=host, port=port)
